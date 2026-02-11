@@ -133,9 +133,7 @@ class Aimbot:
             'mouse_dpi': cfg.mouse_dpi,
             'mouse_sensitivity': cfg.mouse_sensitivity,
             'mouse_fov_width': cfg.mouse_fov_width,
-            'mouse_fov_height': cfg.mouse_fov_height,
-            'viGEmBus_move_scope': cfg.viGEmBus_move_scope,
-            'viGEmBus_move_sleep': cfg.viGEmBus_move_sleep
+            'mouse_fov_height': cfg.mouse_fov_height
         }
 
     def initialize(self):
