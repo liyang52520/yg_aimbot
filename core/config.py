@@ -32,6 +32,7 @@ class Config():
         self.config_AI = self.config["AI"]
         self.ai_model_name = str(self.config_AI["ai_model_name"])
         self.ai_model_image_size = int(self.config_AI["ai_model_image_size"])
+        self.ai_model_type = self.config_AI["ai_model_type"]
         self.ai_conf = float(self.config_AI["ai_conf"])
         self.ai_device = str(self.config_AI["ai_device"])
         self.ai_tracker = self.config_AI.getboolean("ai_tracker")

@@ -355,7 +355,7 @@ class AIConfigTab(QWidget):
         current_model = self.ai_model_name.currentText()
         self.ai_model_name.clear()
         models_dir = "models"
-        extensions = [".onnx"]
+        extensions = [".pt", ".onnx", ".engine"]
 
         try:
             if os.path.exists(models_dir) and os.path.isdir(models_dir):
