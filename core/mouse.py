@@ -128,7 +128,7 @@ class MouseController:
         target_vx, target_vy = self._calculate_target_velocity(current_time)
 
         # 预测目标位置
-        prediction_time = 0.025
+        prediction_time = 0.05
         predicted_offset_x = offset_x + target_vx * prediction_time
         predicted_offset_y = offset_y + target_vy * prediction_time
 
