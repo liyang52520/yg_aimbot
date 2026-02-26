@@ -44,6 +44,7 @@ class MainWindow(QMainWindow):
             image_signal.capture_fps.connect(self.update_capture_fps)
             image_signal.predict_fps.connect(self.update_predict_fps)
             image_signal.clear_predict_fps.connect(self.clear_predict_fps)
+            image_signal.detection_result.connect(self.update_detections)
         except ImportError:
             pass
 
@@ -229,13 +230,10 @@ class MainWindow(QMainWindow):
         self.ai_config_tab.update_predict_fps(fps)
 
     def clear_predict_fps(self):
-        """清零预测帧率"""
         self.ai_config_tab.clear_predict_fps()
     
+    def update_detections(self, detections):
+        self.ai_config_tab.update_detections(detections)
+    
     def update_capture_window_limits(self, max_size):
-        """更新捕获窗口大小的限制
-        
-        Args:
-            max_size: 最大捕获窗口大小
-        """
         self.ai_config_tab.update_capture_window_limits(max_size)

@@ -432,8 +432,12 @@ class Aimbot:
                     prediction_count += 1
                     self.prediction_times.append(result_timestamp)
 
-                    # 解析结果
-                    if result is not None:
+                    # 发送预测结果到GUI（当capture_ai_debug开启时）
+                    if cfg.capture_ai_debug and result is not None:
+                        image_signal.detection_result.emit(result)
+
+                    # 解析结果并执行瞄准（只在热键触发时）
+                    if result is not None and self._check_need_aim():
                         await asyncio.get_event_loop().run_in_executor(
                             self.executor, frameParser.parse, result
                         )
@@ -550,38 +554,30 @@ class Aimbot:
             logger.info("自瞄系统已停止")
 
     def _check_need_prediction(self):
-        """检查是否需要预测"""
-        # 检查自动瞄准
+        if cfg.capture_ai_debug:
+            return True
+
         if cfg.aim_auto:
             return True
 
-        # 检查自瞄模式
         if cfg.aim_mode == "toggle":
-            # 切换模式：按一下开启，再按一下关闭
             for key_code in self.cached_hotkey_codes:
                 try:
-                    # 获取当前按键状态
                     current_state = win32api.GetKeyState(key_code) < 0
-                    # 获取上次按键状态
                     last_state = self.key_states.get(key_code, False)
 
-                    # 检测按键按下事件（从释放到按下）
                     if current_state and not last_state:
-                        # 切换自瞄状态
                         self.toggle_aim_enabled = not self.toggle_aim_enabled
                         if cfg.capture_ai_debug:
                             logger.info(f"自瞄已{'开启' if self.toggle_aim_enabled else '关闭'} (切换模式)")
 
-                    # 更新按键状态
                     self.key_states[key_code] = current_state
                 except Exception as e:
                     if cfg.capture_ai_debug:
                         logger.error(f"热键检查错误: {e}")
 
-            # 返回切换模式的自瞄状态
             return self.toggle_aim_enabled
         else:
-            # 按住模式：保持原有的逻辑
             for key_code in self.cached_hotkey_codes:
                 try:
                     if win32api.GetKeyState(key_code) < 0:
@@ -590,15 +586,29 @@ class Aimbot:
                     if cfg.capture_ai_debug:
                         logger.error(f"热键检查错误: {e}")
 
-        # 默认不预测
-        # 当自瞄关闭时，发送信号清零预测帧率并清空预测时间记录
         try:
             image_signal.clear_predict_fps.emit()
         except Exception as e:
             if cfg.capture_ai_debug:
                 logger.error(f"发送信号错误: {e}")
-        # 清空预测时间记录
         self.prediction_times.clear()
+        return False
+
+    def _check_need_aim(self):
+        if cfg.aim_auto:
+            return True
+
+        if cfg.aim_mode == "toggle":
+            return self.toggle_aim_enabled
+        else:
+            for key_code in self.cached_hotkey_codes:
+                try:
+                    if win32api.GetKeyState(key_code) < 0:
+                        return True
+                except Exception as e:
+                    if cfg.capture_ai_debug:
+                        logger.error(f"热键检查错误: {e}")
+
         return False
 
 
