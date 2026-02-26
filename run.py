@@ -2,6 +2,7 @@ import asyncio
 import concurrent.futures
 import logging
 import os
+import queue
 import sys
 import threading
 import time
@@ -236,6 +237,12 @@ class Aimbot:
         self.cached_hotkey_codes = []
         self._cache_hotkey_codes()
 
+        # 异步预测队列
+        self._prediction_task_queue = queue.Queue(maxsize=2)
+        self._prediction_result_queue = queue.Queue(maxsize=2)
+        self._prediction_worker_thread = None
+        self._prediction_worker_running = False
+
     def _cache_hotkey_codes(self):
         """缓存热键代码，避免重复查找"""
         self.cached_hotkey_codes = []
@@ -243,6 +250,32 @@ class Aimbot:
             key_code = Buttons.KEY_CODES.get(key_name.strip())
             if key_code:
                 self.cached_hotkey_codes.append(key_code)
+
+    def _prediction_worker(self):
+        """预测工作线程"""
+        while self._prediction_worker_running:
+            try:
+                image, timestamp = self._prediction_task_queue.get(timeout=0.1)
+                
+                # 执行预测
+                result = self.model.predict(image)
+                
+                # 应用跟踪器
+                if tracker and result is not None:
+                    result = tracker.update_with_detections(result)
+                
+                # 将结果放入结果队列
+                try:
+                    self._prediction_result_queue.put_nowait((result, timestamp))
+                except queue.Full:
+                    pass
+                
+                self._prediction_task_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                if cfg.capture_ai_debug:
+                    logger.error(f"预测工作线程错误: {e}")
 
     def _get_current_config(self):
         """获取当前配置快照"""
@@ -311,6 +344,12 @@ class Aimbot:
             self.last_config = self._get_current_config()
             self.last_config_check_time = time.time()
             self.last_fps_update_time = time.time()
+            
+            # 启动预测工作线程
+            self._prediction_worker_running = True
+            self._prediction_worker_thread = threading.Thread(target=self._prediction_worker, daemon=True)
+            self._prediction_worker_thread.start()
+            
             return True
         except Exception as e:
             logger.error("初始化失败:\n", exc_info=e)
@@ -380,26 +419,26 @@ class Aimbot:
                 # 检查是否需要预测
                 need_prediction = self._check_need_prediction()
 
-                # 执行预测
+                # 执行预测 - 非阻塞方式
                 if need_prediction:
-                    # 执行预测
-                    result = await asyncio.get_event_loop().run_in_executor(
-                        self.executor, self.model.predict, image
-                    )
+                    try:
+                        self._prediction_task_queue.put_nowait((image, current_time))
+                    except queue.Full:
+                        pass
+
+                # 处理预测结果
+                try:
+                    result, result_timestamp = self._prediction_result_queue.get_nowait()
                     prediction_count += 1
-
-                    # 记录预测时间
-                    self.prediction_times.append(time.time())
-
-                    # 应用跟踪器
-                    if tracker and result is not None:
-                        result = tracker.update_with_detections(result)
+                    self.prediction_times.append(result_timestamp)
 
                     # 解析结果
                     if result is not None:
                         await asyncio.get_event_loop().run_in_executor(
                             self.executor, frameParser.parse, result
                         )
+                except queue.Empty:
+                    pass
 
             except Exception as e:
                 # 减少日志开销
@@ -483,6 +522,11 @@ class Aimbot:
         if cfg.capture_ai_debug:
             logger.info("正在停止自瞄系统...")
         self.running = False
+
+        # 停止预测工作线程
+        self._prediction_worker_running = False
+        if self._prediction_worker_thread and self._prediction_worker_thread.is_alive():
+            self._prediction_worker_thread.join(timeout=1.0)
 
         # 关闭线程池
         if self.executor:

@@ -1,5 +1,7 @@
 import logging
 import math
+import queue
+import threading
 import time
 from collections import deque
 from functools import lru_cache
@@ -18,6 +20,7 @@ class MouseController:
 
     def __init__(self):
         self._initialize_parameters()
+        self._initialize_thread()
 
     def _initialize_parameters(self):
         """初始化参数"""
@@ -52,6 +55,14 @@ class MouseController:
         
         # 预计算常量
         self._cache_config()
+    
+    def _initialize_thread(self):
+        """初始化鼠标移动线程"""
+        self._move_queue = queue.Queue(maxsize=10)
+        self._move_thread_running = True
+        self._move_thread = threading.Thread(target=self._move_worker, daemon=True)
+        self._move_thread.start()
+        logger.info("鼠标移动线程已启动")
     
     def _cache_config(self):
         """缓存配置计算值，避免重复计算"""
@@ -191,14 +202,40 @@ class MouseController:
         target_vy = (self.target_history[-1][1] - prev[1]) * inv_dt
         return target_vx, target_vy
 
-    def _execute_movement(self, x, y):
-        """执行鼠标移动"""
-        ix, iy = int(x), int(y)
+    def _move_worker(self):
+        """鼠标移动工作线程"""
+        while self._move_thread_running:
+            try:
+                move_x, move_y = self._move_queue.get(timeout=0.1)
+                self._perform_move(move_x, move_y)
+                self._move_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"鼠标移动线程错误: {e}")
+        logger.info("鼠标移动线程已停止")
 
+    def _perform_move(self, x, y):
+        """实际执行鼠标移动"""
+        ix, iy = int(x), int(y)
         if cfg.mouse_move == "makcu":
             MakcuMouse.move(ix, iy)
         else:
             logger.warning("Only support Makcu move!")
+
+    def _execute_movement(self, x, y):
+        """执行鼠标移动 - 将移动指令放入队列"""
+        try:
+            self._move_queue.put_nowait((x, y))
+        except queue.Full:
+            pass
+
+    def stop(self):
+        """停止鼠标移动线程"""
+        self._move_thread_running = False
+        if self._move_thread.is_alive():
+            self._move_thread.join(timeout=1.0)
+        logger.info("鼠标控制器已停止")
 
 
 # 创建全局实例
