@@ -3,11 +3,18 @@ import numpy as np
 from typing import Optional, Any
 
 import supervision as sv
-from torch.backends.mkl import verbose
 
 from .yolo_model import YOLOModel
 
 logger = logging.getLogger(__name__)
+
+# 空检测结果常量，避免重复创建
+_EMPTY_DETECTIONS = sv.Detections(
+    xyxy=np.empty((0, 4)),
+    confidence=np.empty(0),
+    class_id=np.empty(0, dtype=int)
+)
+
 
 class UltralyticsYOLOModel(YOLOModel):
     """
@@ -15,11 +22,25 @@ class UltralyticsYOLOModel(YOLOModel):
     支持直接使用ultralytics库加载各种格式的模型
     """
     
+    # 默认输入大小
+    DEFAULT_INPUT_SIZE = 640
+    
     def __init__(self, model_path: str, device: str, conf: float):
         super().__init__(model_path, device, conf)
         self.model = None
+        self._input_size = self.DEFAULT_INPUT_SIZE
+        self._device_str = None  # 缓存处理后的设备字符串
     
-    def load_model(self):
+    def _process_device(self, device: str) -> str:
+        """处理设备字符串，缓存结果避免重复处理"""
+        if self._device_str is None:
+            if device.isdigit():
+                self._device_str = f"cuda:{device}"
+            else:
+                self._device_str = device
+        return self._device_str
+    
+    def load_model(self) -> bool:
         """
         加载Ultralytics YOLO模型
         使用ultralytics库直接加载各种格式的模型
@@ -27,29 +48,34 @@ class UltralyticsYOLOModel(YOLOModel):
         try:
             from ultralytics import YOLO
             
-            # 处理设备字符串
-            device = self.device
-            if device.isdigit():
-                device = f"cuda:{device}"
+            device = self._process_device(self.device)
             
             # 使用ultralytics库加载模型（支持pt、onnx、engine、Openvino等格式）
             self.model = YOLO(self.model_path, task="detect")
             
             # 获取模型输入大小
-            self.input_size = self._get_model_input_size()
+            self._input_size = self._get_model_input_size()
             
             # 预热模型
-            dummy_image = np.zeros((self.input_size, self.input_size, 3), dtype=np.uint8)
-            self.predict(dummy_image)
+            self._warmup()
             
             logger.info(f"Ultralytics YOLO模型加载成功: {self.model_path}")
-            logger.info(f"模型输入大小: {self.input_size}x{self.input_size}")
+            logger.info(f"模型输入大小: {self._input_size}x{self._input_size}")
             return True
         except Exception as e:
             logger.error(f"Ultralytics YOLO模型加载失败: {e}")
             return False
     
-    def _get_model_input_size(self):
+    def _warmup(self):
+        """预热模型"""
+        try:
+            dummy_image = np.zeros((self._input_size, self._input_size, 3), dtype=np.uint8)
+            device = self._process_device(self.device)
+            self.model(dummy_image, conf=self.conf, device=device, verbose=False)
+        except Exception as e:
+            logger.warning(f"模型预热失败: {e}")
+    
+    def _get_model_input_size(self) -> int:
         """
         获取模型输入大小
         
@@ -62,23 +88,21 @@ class UltralyticsYOLOModel(YOLOModel):
                 return int(self.model.model.yaml['height'])
             elif hasattr(self.model, 'model') and hasattr(self.model.model, 'stride'):
                 # 对于某些模型，我们可以通过stride推断输入大小
-                # 默认使用640作为 fallback
-                return 640
+                return self.DEFAULT_INPUT_SIZE
             else:
-                # 默认为640
-                return 640
+                return self.DEFAULT_INPUT_SIZE
         except Exception as e:
-            logger.warning(f"获取模型输入大小失败，使用默认值640: {e}")
-            return 640
+            logger.warning(f"获取模型输入大小失败，使用默认值{self.DEFAULT_INPUT_SIZE}: {e}")
+            return self.DEFAULT_INPUT_SIZE
     
-    def get_input_size(self):
+    def get_input_size(self) -> int:
         """
         获取模型输入大小
         
         Returns:
             int: 模型输入大小（正方形）
         """
-        return getattr(self, 'input_size', 640)
+        return self._input_size
     
     def predict(self, image: np.ndarray) -> sv.Detections:
         """
@@ -92,30 +116,26 @@ class UltralyticsYOLOModel(YOLOModel):
         """
         if not self.model:
             logger.error("模型未加载")
-            return sv.Detections(
-                xyxy=np.empty((0, 4)),
-                confidence=np.empty(0),
-                class_id=np.empty(0, dtype=int)
-            )
+            return _EMPTY_DETECTIONS
         
         try:
-            # 处理设备字符串
-            device = self.device
-            if device.isdigit():
-                device = f"cuda:{device}"
+            device = self._process_device(self.device)
             
             # 执行推理（ultralytics库会自动处理不同格式的模型）
-            results = self.model(image, conf=self.conf, device=device, half=True, max_det=3, verbose=False)
+            results = self.model(
+                image, 
+                conf=self.conf, 
+                device=device, 
+                half=True, 
+                max_det=3, 
+                verbose=False
+            )
             
             # 后处理
             return self.postprocess(results, image.shape)
         except Exception as e:
             logger.error(f"预测错误: {e}")
-            return sv.Detections(
-                xyxy=np.empty((0, 4)),
-                confidence=np.empty(0),
-                class_id=np.empty(0, dtype=int)
-            )
+            return _EMPTY_DETECTIONS
     
     def postprocess(self, outputs: Any, image_shape: tuple) -> sv.Detections:
         """
@@ -134,8 +154,4 @@ class UltralyticsYOLOModel(YOLOModel):
             return detections
         
         # 如果没有结果，返回空检测
-        return sv.Detections(
-            xyxy=np.empty((0, 4)),
-            confidence=np.empty(0),
-            class_id=np.empty(0, dtype=int)
-        )
+        return _EMPTY_DETECTIONS

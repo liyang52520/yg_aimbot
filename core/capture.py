@@ -32,7 +32,7 @@ class Capture(threading.Thread):
         self.last_config_check_time = time.time()
         self.last_capture_window_width = None
         self.last_capture_window_height = None
-        self.config_check_interval = 0.2  # 进一步降低配置检查频率
+        self.config_check_interval = 0.5  # 降低配置检查频率，减少开销
         
         # 预计算的掩码，避免重复计算
         self.circle_mask = None
@@ -45,6 +45,13 @@ class Capture(threading.Thread):
         # 缓存的显示器分辨率
         self.display_width = 1920
         self.display_height = 1080
+        
+        # 预计算的监控区域
+        self.monitor = None
+        
+        # 帧率控制优化
+        self._frame_interval = 1.0 / 60  # 默认60fps
+        self._sleep_threshold = 0.001  # 最小休眠阈值
 
         # 初始化配置
         self.update_config()
@@ -53,22 +60,25 @@ class Capture(threading.Thread):
         """线程运行方法"""
         self.sct = mss.mss()
         last_frame_time = time.time()
-        frame_interval = 1.0 / cfg.capture_fps
         config_check_timer = time.time()
+        
+        # 预分配缓冲区
+        frame_buffer = None
 
         try:
             while self.running:
                 current_time = time.time()
 
-                # 定期检查配置变更
+                # 定期检查配置变更 - 降低频率
                 if current_time - config_check_timer >= self.config_check_interval:
                     self.update_config()
                     config_check_timer = current_time
                     # 动态更新帧率配置
-                    frame_interval = 1.0 / cfg.capture_fps
+                    self._frame_interval = 1.0 / cfg.capture_fps
 
                 # 控制帧率
-                if current_time - last_frame_time >= frame_interval:
+                elapsed = current_time - last_frame_time
+                if elapsed >= self._frame_interval:
                     frame = self.capture_frame()
                     if frame is not None:
                         # 处理图像
@@ -80,12 +90,17 @@ class Capture(threading.Thread):
                         last_frame_time = current_time
                 else:
                     # 使用更精确的休眠时间，避免CPU空转
-                    sleep_time = max(0, frame_interval - (current_time - last_frame_time) - 0.00005)
-                    if sleep_time > 0.0001:
+                    sleep_time = self._frame_interval - elapsed - 0.00005
+                    if sleep_time > self._sleep_threshold:
                         time.sleep(sleep_time)
+        except Exception as e:
+            logger.error(f"捕获线程异常: {e}")
         finally:
             if self.sct:
-                self.sct.close()
+                try:
+                    self.sct.close()
+                except:
+                    pass
 
     def capture_frame(self):
         """捕获一帧屏幕"""
@@ -111,8 +126,10 @@ class Capture(threading.Thread):
 
     def _calculate_mss_offset(self):
         """计算mss偏移"""
-        left = self.display_width // 2 - cfg.capture_window_width // 2
-        top = self.display_height // 2 - cfg.capture_window_height // 2
+        half_width = cfg.capture_window_width >> 1
+        half_height = cfg.capture_window_height >> 1
+        left = (self.display_width >> 1) - half_width
+        top = (self.display_height >> 1) - half_height
         return int(left), int(top), int(cfg.capture_window_width), int(cfg.capture_window_height)
 
     def get_primary_display_resolution(self):
@@ -137,12 +154,14 @@ class Capture(threading.Thread):
             if (self.circle_mask is None or 
                 self.circle_mask.shape[0] != height or 
                 self.circle_mask.shape[1] != width):
-                center = (width // 2, height // 2)
-                radius = min(width, height) // 2
+                
+                center_x = width >> 1
+                center_y = height >> 1
+                radius = min(width, height) >> 1
                 
                 # 创建掩码
                 self.circle_mask = np.zeros((height, width), dtype=np.uint8)
-                cv2.circle(self.circle_mask, center, radius, 255, -1)
+                cv2.circle(self.circle_mask, (center_x, center_y), radius, 255, -1)
                 
                 # 创建三通道掩码
                 self.circle_mask_3ch = cv2.merge([self.circle_mask, self.circle_mask, self.circle_mask])
@@ -161,13 +180,14 @@ class Capture(threading.Thread):
             if self.last_capture_window_width is None or self.last_capture_window_height is None:
                 self.last_capture_window_width = cfg.capture_window_width
                 self.last_capture_window_height = cfg.capture_window_height
-                self.screen_x_center = cfg.capture_window_width // 2
-                self.screen_y_center = cfg.capture_window_height // 2
+                self.screen_x_center = cfg.capture_window_width >> 1
+                self.screen_y_center = cfg.capture_window_height >> 1
                 self.get_primary_display_resolution()
                 left, top, w, h = self._calculate_mss_offset()
                 self.monitor = {"left": left, "top": top, "width": w, "height": h}
                 # 重置掩码
                 self.circle_mask = None
+                self.circle_mask_3ch = None
                 if cfg.capture_ai_debug:
                     logger.info(f"捕获窗口配置已初始化: {w}x{h}")
                 return
@@ -177,8 +197,8 @@ class Capture(threading.Thread):
                     cfg.capture_window_height != self.last_capture_window_height):
 
                 # 更新屏幕中心坐标
-                self.screen_x_center = cfg.capture_window_width // 2
-                self.screen_y_center = cfg.capture_window_height // 2
+                self.screen_x_center = cfg.capture_window_width >> 1
+                self.screen_y_center = cfg.capture_window_height >> 1
 
                 # 重新计算监控区域
                 left, top, w, h = self._calculate_mss_offset()
@@ -190,7 +210,10 @@ class Capture(threading.Thread):
 
                 # 重新初始化mss对象以确保新的捕获区域生效
                 if self.sct:
-                    self.sct.close()
+                    try:
+                        self.sct.close()
+                    except:
+                        pass
                     self.sct = mss.mss()
                     if cfg.capture_ai_debug:
                         logger.info("MSS对象已重新初始化以应用新的捕获窗口大小")

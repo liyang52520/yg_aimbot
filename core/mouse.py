@@ -2,6 +2,7 @@ import logging
 import math
 import time
 from collections import deque
+from functools import lru_cache
 
 from core.config import cfg
 from core.move.makcu_mouse import MakcuMouse
@@ -48,7 +49,22 @@ class MouseController:
         
         # 模型输入大小（默认640，会在模型加载后更新）
         self.model_input_size = 640
+        
+        # 预计算常量
+        self._cache_config()
     
+    def _cache_config(self):
+        """缓存配置计算值，避免重复计算"""
+        self._dpi_factor = cfg.mouse_dpi * (1.0 / cfg.mouse_sensitivity)
+    
+    def update_config_cache(self):
+        """当配置变更时更新缓存"""
+        self._cache_config()
+        self.screen_width = cfg.capture_window_width
+        self.screen_height = cfg.capture_window_height
+        self.center_x = self.screen_width / 2
+        self.center_y = self.screen_height / 2
+
     def set_model_input_size(self, input_size):
         """设置模型输入大小
         
@@ -65,18 +81,17 @@ class MouseController:
         if target_x is None:
             return
 
-        # 输入验证
-        if any(map(math.isnan, (target_x, target_y, target_w, target_h))):
-            return
-
-        if target_w <= 0 or target_h <= 0:
+        # 输入验证 - 使用更快的检查方式
+        if not (target_w > 0 and target_h > 0 and 
+                target_x == target_x and target_y == target_y):  # NaN检查
             return
 
         # 计算移动
         move_x, move_y = self._calculate_movement(target_x, target_y, target_w, target_h)
 
-        # 执行移动
-        if abs(move_x) > self.min_move or abs(move_y) > self.min_move:
+        # 执行移动 - 使用绝对值比较避免重复计算
+        if move_x * move_x > self.min_move * self.min_move or \
+           move_y * move_y > self.min_move * self.min_move:
             self._execute_movement(move_x, move_y)
 
     def _parse_data(self, data):
@@ -99,16 +114,13 @@ class MouseController:
 
     def _calculate_movement(self, target_x, target_y, target_w, target_h):
         """计算鼠标移动距离"""
-        # 使用最新的配置值，确保捕获窗口大小变更时能正确计算
-        from core.config import cfg
-
         # 考虑捕获窗口大小和模型输入大小之间的比例关系
         # 当捕获窗口大小与模型输入大小不同时，需要调整目标坐标
         capture_to_model_ratio = self.model_input_size / max(cfg.capture_window_width, cfg.capture_window_height)
 
         # 使用模型输入大小的中心，这样无论捕获窗口大小如何变化，计算出的鼠标移动都是准确的
-        center_x = self.model_input_size / 2
-        center_y = self.model_input_size / 2
+        center_x = self.model_input_size * 0.5
+        center_y = self.model_input_size * 0.5
 
         # 调整目标坐标，考虑捕获窗口大小和模型输入大小之间的比例关系
         adjusted_target_x = target_x * capture_to_model_ratio
@@ -118,7 +130,10 @@ class MouseController:
         # 计算偏移量
         offset_x = adjusted_target_x - center_x
         offset_y = adjusted_target_y - center_y
-        distance = math.sqrt(offset_x ** 2 + offset_y ** 2)
+        
+        # 使用平方距离避免开方运算
+        distance_sq = offset_x * offset_x + offset_y * offset_y
+        distance = math.sqrt(distance_sq) if distance_sq > 0 else 0
 
         # 记录目标历史
         current_time = time.time()
@@ -133,31 +148,29 @@ class MouseController:
         predicted_offset_y = offset_y + target_vy * prediction_time
 
         # 平滑处理
-        self.current_offset_x = self.smooth_factor * predicted_offset_x + (
-                1 - self.smooth_factor) * self.current_offset_x
-        self.current_offset_y = self.smooth_factor * predicted_offset_y + (
-                1 - self.smooth_factor) * self.current_offset_y
+        inv_smooth = 1.0 - self.smooth_factor
+        self.current_offset_x = self.smooth_factor * predicted_offset_x + inv_smooth * self.current_offset_x
+        self.current_offset_y = self.smooth_factor * predicted_offset_y + inv_smooth * self.current_offset_y
 
-        # 计算角度，使用模型输入大小，这样无论捕获窗口大小如何变化，计算出的鼠标移动都是准确的
+        # 计算角度，使用模型输入大小
         degrees_per_pixel_x = cfg.mouse_fov_width / self.model_input_size
         degrees_per_pixel_y = cfg.mouse_fov_height / self.model_input_size
 
         angle_x = self.current_offset_x * degrees_per_pixel_x
         angle_y = self.current_offset_y * degrees_per_pixel_y
 
-        # 转换为鼠标移动距离
-        move_x = (angle_x / 360) * (cfg.mouse_dpi * (1 / cfg.mouse_sensitivity))
-        move_y = (angle_y / 360) * (cfg.mouse_dpi * (1 / cfg.mouse_sensitivity))
+        # 转换为鼠标移动距离 - 使用缓存的dpi因子
+        move_x = (angle_x / 360.0) * self._dpi_factor
+        move_y = (angle_y / 360.0) * self._dpi_factor
 
-        # 添加微小抖动
+        # 添加微小抖动 - 只在距离较近时
         if distance < adjusted_target_w * 0.3:
             self.tremor_phase += 0.3
-            tremor_x = math.sin(self.tremor_phase) * self.tremor_amount * (distance / adjusted_target_w)
-            tremor_y = math.cos(self.tremor_phase * 1.3) * self.tremor_amount * (distance / adjusted_target_w)
-            move_x += tremor_x
-            move_y += tremor_y
+            tremor_scale = self.tremor_amount * (distance / adjusted_target_w)
+            move_x += math.sin(self.tremor_phase) * tremor_scale
+            move_y += math.cos(self.tremor_phase * 1.3) * tremor_scale
 
-        # 限制最大移动距离
+        # 限制最大移动距离 - 使用min/max避免条件分支
         move_x = max(-self.max_move, min(self.max_move, move_x))
         move_y = max(-self.max_move, min(self.max_move, move_y))
 
@@ -166,15 +179,16 @@ class MouseController:
     def _calculate_target_velocity(self, current_time):
         """计算目标速度"""
         if len(self.target_history) < 2:
-            return 0, 0
+            return 0.0, 0.0
 
         prev = self.target_history[-2]
         dt = current_time - prev[2]
         if dt <= 0.001:
-            return 0, 0
+            return 0.0, 0.0
 
-        target_vx = (self.target_history[-1][0] - prev[0]) / dt
-        target_vy = (self.target_history[-1][1] - prev[1]) / dt
+        inv_dt = 1.0 / dt
+        target_vx = (self.target_history[-1][0] - prev[0]) * inv_dt
+        target_vy = (self.target_history[-1][1] - prev[1]) * inv_dt
         return target_vx, target_vy
 
     def _execute_movement(self, x, y):

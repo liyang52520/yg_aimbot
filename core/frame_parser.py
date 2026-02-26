@@ -1,5 +1,7 @@
 import logging
+import math
 import time
+from functools import lru_cache
 
 import numpy as np
 import supervision as sv
@@ -14,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 class Target:
     """目标对象"""
+    __slots__ = ['x', 'y', 'w', 'h', 'cls']  # 使用__slots__减少内存占用
 
     def __init__(self, x, y, w, h, cls):
         # 使用实时的配置值，确保配置变更时能立即生效
@@ -35,10 +38,27 @@ class FrameParser:
         self.tracked_target = None
         self.tracking_confidence = 0.0
         self.max_tracking_distance = 80  # 像素
+        self.max_tracking_distance_sq = self.max_tracking_distance ** 2  # 预计算平方值
         self.switch_cooldown = 0.1  # 秒
-        self.last_switch_time = 0
-        self.last_process_time = 0
+        self.last_switch_time = 0.0
+        self.last_process_time = 0.0
         self.min_process_interval = 0.005
+        
+        # 缓存配置值
+        self._target_cls = cfg.aim_target_cls
+        self._max_distance = getattr(cfg, 'aim_max_target_distance', 150)
+        
+        # 预创建张量，避免重复创建
+        self._center_tensor = None
+        self._update_center_tensor()
+    
+    def _update_center_tensor(self):
+        """更新中心点张量"""
+        self._center_tensor = torch.tensor(
+            [capture.screen_x_center, capture.screen_y_center], 
+            device=self.arch, 
+            dtype=torch.float32
+        )
 
     def parse(self, result):
         """解析检测结果"""
@@ -85,24 +105,22 @@ class FrameParser:
 
     def _handle_target(self, target):
         """处理目标"""
-        if target.cls != cfg.aim_target_cls:
+        # 更新缓存的配置值
+        self._target_cls = cfg.aim_target_cls
+        self._max_distance = getattr(cfg, 'aim_max_target_distance', 150)
+        
+        if target.cls != self._target_cls:
             self._reset_tracking()
             return
 
-        # 计算目标与屏幕中心的距离
-        import math
-        center_x = capture.screen_x_center
-        center_y = capture.screen_y_center
-        distance = math.sqrt((target.x - center_x) ** 2 + (target.y - center_y) ** 2)
-
-        # 检查目标是否在配置的最大距离范围内
-        if hasattr(cfg, 'aim_max_target_distance'):
-            max_distance = cfg.aim_max_target_distance
-        else:
-            max_distance = 150  # 默认值
+        # 计算目标与屏幕中心的距离 - 使用平方距离避免开方
+        dx = target.x - capture.screen_x_center
+        dy = target.y - capture.screen_y_center
+        distance_sq = dx * dx + dy * dy
+        distance = math.sqrt(distance_sq)
 
         # 只有在范围内才进行瞄准
-        if distance <= max_distance:
+        if distance <= self._max_distance:
             # 传递给鼠标控制
             mouse.process_data((target.x, target.y, target.w, target.h, target.cls))
 
@@ -141,24 +159,28 @@ class FrameParser:
         """转换Supervision格式到tensor"""
         xyxy = frame.xyxy
         # 计算中心点和宽高
-        cx = (xyxy[:, 0] + xyxy[:, 2]) / 2
-        cy = (xyxy[:, 1] + xyxy[:, 3]) / 2
+        cx = (xyxy[:, 0] + xyxy[:, 2]) * 0.5
+        cy = (xyxy[:, 1] + xyxy[:, 3]) * 0.5
         w = xyxy[:, 2] - xyxy[:, 0]
         h = xyxy[:, 3] - xyxy[:, 1]
 
         # 合并为单一numpy数组再转换为tensor
         xywh_np = np.stack([cx, cy, w, h], axis=1)
-        xywh = torch.tensor(xywh_np, dtype=torch.float32).to(self.arch)
-
+        xywh = torch.from_numpy(xywh_np).to(self.arch)
+        
         classes_tensor = torch.from_numpy(np.array(frame.class_id, dtype=np.float32)).to(self.arch)
         return xywh, classes_tensor
 
     def _find_best_target(self, boxes_array, classes_tensor):
         """找到最佳目标"""
-        center = torch.tensor([capture.screen_x_center, capture.screen_y_center], device=self.arch)
+        # 更新中心点张量（捕获窗口可能改变）
+        if (self._center_tensor[0].item() != capture.screen_x_center or 
+            self._center_tensor[1].item() != capture.screen_y_center):
+            self._update_center_tensor()
 
-        # 计算距离
-        distances_sq = torch.sum((boxes_array[:, :2] - center) ** 2, dim=1)
+        # 计算距离 - 使用平方距离
+        diff = boxes_array[:, :2] - self._center_tensor
+        distances_sq = torch.sum(diff * diff, dim=1)
 
         # 优先保持目标跟踪
         if self.tracked_target and self.tracking_confidence > 0.3:
@@ -169,13 +191,18 @@ class FrameParser:
                 return self.tracked_target
 
             # 查找最接近当前跟踪目标的新目标
-            tracked_pos = torch.tensor([self.tracked_target.x, self.tracked_target.y], device=self.arch)
-            tracked_distances = torch.sum((boxes_array[:, :2] - tracked_pos) ** 2, dim=1)
+            tracked_pos = torch.tensor(
+                [self.tracked_target.x, self.tracked_target.y], 
+                device=self.arch,
+                dtype=torch.float32
+            )
+            tracked_diff = boxes_array[:, :2] - tracked_pos
+            tracked_distances_sq = torch.sum(tracked_diff * tracked_diff, dim=1)
 
-            min_tracked_dist, tracked_idx = torch.min(tracked_distances, dim=0)
+            min_tracked_dist_sq, tracked_idx = torch.min(tracked_distances_sq, dim=0)
 
             # 如果距离在合理范围内，继续跟踪
-            if min_tracked_dist.item() < self.max_tracking_distance ** 2:
+            if min_tracked_dist_sq.item() < self.max_tracking_distance_sq:
                 target_data = boxes_array[tracked_idx.item(), :4].cpu().numpy()
                 target_class = classes_tensor[tracked_idx.item()].item()
                 return Target(*target_data, target_class)
