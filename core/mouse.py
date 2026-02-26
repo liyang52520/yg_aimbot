@@ -35,7 +35,7 @@ class MouseController:
         self.center_y = self.screen_height / 2
 
         # 核心参数
-        self.smooth_factor = 0.5
+        self.smooth_factor = 0.6
 
         # 状态变量
         self.current_offset_x = 0.0
@@ -47,8 +47,8 @@ class MouseController:
         self.tremor_phase = 0.0
 
         # 限制参数
-        self.max_move = 40
-        self.min_move = 0.8
+        self.max_move = 20
+        self.min_move = 1
         
         # 模型输入大小（默认640，会在模型加载后更新）
         self.model_input_size = 640
@@ -154,7 +154,7 @@ class MouseController:
         target_vx, target_vy = self._calculate_target_velocity(current_time)
 
         # 预测目标位置
-        prediction_time = 0.05
+        prediction_time = 0.025
         predicted_offset_x = offset_x + target_vx * prediction_time
         predicted_offset_y = offset_y + target_vy * prediction_time
 
