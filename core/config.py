@@ -100,7 +100,6 @@ class Config:
         self.ai_model_type = "yolov5" if self.ai_model_name.lower().startswith("yolov5") else "ultralytics"
         self.ai_conf = self._get_float("AI", "ai_conf")
         self.ai_device = self._get_str("AI", "ai_device")
-        self.ai_tracker = self._get_boolean("AI", "ai_tracker")
 
         # Aim
         self.config_Aim = self.config["Aim"]

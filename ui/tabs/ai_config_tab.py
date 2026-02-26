@@ -236,14 +236,6 @@ class AIConfigTab(QWidget):
         ai_layout.addWidget(self.ai_device, row, 1, 1, 2)
         row += 1
 
-        # AI Tracker
-        label = QLabel("轨迹预测:")
-        label.setStyleSheet("color: #666666;")
-        ai_layout.addWidget(label, row, 0, 1, 1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.ai_tracker = QCheckBox()
-        self.ai_tracker.setStyle(CheckBoxStyle())
-        ai_layout.addWidget(self.ai_tracker, row, 1, 1, 1, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
         return ai_widget
 
     def _create_capture_config_section(self):

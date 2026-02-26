@@ -53,8 +53,6 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 gui_handler.setFormatter(formatter)
 logger.addHandler(gui_handler)
 
-tracker = sv.ByteTrack() if cfg.ai_tracker else None
-
 # 全局检测参数，避免重复创建
 detection_kwargs = {
     'iou': 0.45,
@@ -70,21 +68,16 @@ detection_kwargs = {
     'batch': False,
     'retina_masks': False,
     'classes': None,
-    'simplify': True,
-    'cfg': "config/tracker.yaml"
+    'simplify': True
 }
 
 
-def perform_detection(model, image, tracker=None):
+def perform_detection(model, image):
     """执行目标检测"""
     try:
         # 使用模型的predict方法执行检测
         detections = model.predict(image)
-
-        if tracker:
-            return tracker.update_with_detections(detections)
-        else:
-            return detections
+        return detections
     except Exception as e:
         # 减少日志开销
         if cfg.capture_ai_debug:
@@ -260,10 +253,6 @@ class Aimbot:
                 # 执行预测
                 result = self.model.predict(image)
                 
-                # 应用跟踪器
-                if tracker and result is not None:
-                    result = tracker.update_with_detections(result)
-                
                 # 将结果放入结果队列
                 try:
                     self._prediction_result_queue.put_nowait((result, timestamp))
@@ -283,7 +272,6 @@ class Aimbot:
             'ai_model_name': cfg.ai_model_name,
             'ai_conf': cfg.ai_conf,
             'ai_device': cfg.ai_device,
-            'ai_tracker': cfg.ai_tracker,
             'capture_window_width': cfg.capture_window_width,
             'capture_window_height': cfg.capture_window_height,
             'capture_fps': cfg.capture_fps,
@@ -492,8 +480,7 @@ class Aimbot:
         # 需要重启服务的配置项
         restart_keys = [
             'ai_model_name',
-            'ai_device',
-            'ai_tracker'
+            'ai_device'
         ]
 
         for key in changes:

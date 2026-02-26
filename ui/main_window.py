@@ -119,7 +119,6 @@ class MainWindow(QMainWindow):
             'ai_model_name': self.ai_config_tab.ai_model_name,
             'ai_conf': self.ai_config_tab.ai_conf,
             'ai_device': self.ai_config_tab.ai_device,
-            'ai_tracker': self.ai_config_tab.ai_tracker,
             # Capture配置
             'capture_window_width': self.ai_config_tab.capture_window_width,
             'capture_window_height': self.ai_config_tab.capture_window_height,
@@ -170,7 +169,6 @@ class MainWindow(QMainWindow):
         self.ai_config_tab.ai_model_name.currentTextChanged.connect(self.auto_apply_config)
         self.ai_config_tab.ai_conf.valueChanged.connect(self.auto_apply_config)
         self.ai_config_tab.ai_device.valueChanged.connect(self.auto_apply_config)
-        self.ai_config_tab.ai_tracker.stateChanged.connect(self.auto_apply_config)
 
         # 捕获配置信号
         self.ai_config_tab.capture_window_width.valueChanged.connect(self.auto_apply_config)

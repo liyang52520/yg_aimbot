@@ -32,9 +32,6 @@ class ConfigManager:
             ui_components['ai_device'].setValue(
                 int(self.config["AI"].get("ai_device", "0"))
             )
-            ui_components['ai_tracker'].setChecked(
-                self.config["AI"].getboolean("ai_tracker", True)
-            )
 
         # 加载Capture配置
         if "Capture" in self.config:
@@ -109,8 +106,7 @@ class ConfigManager:
         self.config["AI"] = {
             "ai_model_name": ui_components['ai_model_name'].currentText(),
             "ai_conf": str(ui_components['ai_conf'].value()),
-            "ai_device": str(ui_components['ai_device'].value()),
-            "ai_tracker": str(ui_components['ai_tracker'].isChecked())
+            "ai_device": str(ui_components['ai_device'].value())
         }
 
         # 保存Capture配置
@@ -164,7 +160,6 @@ class ConfigManager:
             cfg.ai_model_type = "yolov5" if  cfg.ai_model_name.lower().startswith("yolov5") else "ultralytics"
             cfg.ai_conf = ui_components['ai_conf'].value()
             cfg.ai_device = str(ui_components['ai_device'].value())
-            cfg.ai_tracker = ui_components['ai_tracker'].isChecked()
 
             # 应用Capture配置
             cfg.capture_window_width = ui_components['capture_window_width'].value()
