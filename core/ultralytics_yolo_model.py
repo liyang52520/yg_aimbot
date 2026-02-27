@@ -4,8 +4,6 @@ from typing import Optional, Any
 
 import supervision as sv
 
-from .yolo_model import YOLOModel
-
 logger = logging.getLogger(__name__)
 
 # 空检测结果常量，避免重复创建
@@ -16,7 +14,7 @@ _EMPTY_DETECTIONS = sv.Detections(
 )
 
 
-class UltralyticsYOLOModel(YOLOModel):
+class UltralyticsYOLOModel:
     """
     Ultralytics YOLO模型实现
     支持直接使用ultralytics库加载各种格式的模型
@@ -26,7 +24,9 @@ class UltralyticsYOLOModel(YOLOModel):
     DEFAULT_INPUT_SIZE = 640
     
     def __init__(self, model_path: str, device: str, conf: float):
-        super().__init__(model_path, device, conf)
+        self.model_path = model_path
+        self.device = device
+        self.conf = conf
         self.model = None
         self._input_size = self.DEFAULT_INPUT_SIZE
         self._device_str = None  # 缓存处理后的设备字符串

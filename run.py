@@ -21,7 +21,7 @@ from core.config import cfg
 from core.frame_parser import frameParser
 # 导入日志配置
 from core.logger import setup_logger
-from core.yolo import create_yolo_model
+from core.ultralytics_yolo_model import UltralyticsYOLOModel
 from ui.main_window import MainWindow
 # 从signals.py导入信号实例
 from ui.signals import log_signal, image_signal
@@ -249,16 +249,16 @@ class Aimbot:
         while self._prediction_worker_running:
             try:
                 image, timestamp = self._prediction_task_queue.get(timeout=0.1)
-                
+
                 # 执行预测
                 result = self.model.predict(image)
-                
+
                 # 将结果放入结果队列
                 try:
                     self._prediction_result_queue.put_nowait((result, timestamp))
                 except queue.Full:
                     pass
-                
+
                 self._prediction_task_queue.task_done()
             except queue.Empty:
                 continue
@@ -295,18 +295,23 @@ class Aimbot:
         try:
             # 加载YOLO模型
             model_path = f"data/{cfg.ai_model_name}"
-            self.model = create_yolo_model(model_path, cfg.ai_device, cfg.ai_conf, cfg.ai_model_type)
+            self.model = UltralyticsYOLOModel(model_path, cfg.ai_device, cfg.ai_conf)
 
             if not self.model:
                 logger.error("模型加载失败")
                 return False
-            
+
+            # 加载模型
+            if not self.model.load_model():
+                logger.error("模型加载失败")
+                return False
+
             # 获取模型输入大小并更新鼠标控制器
             from core.mouse import mouse
             model_input_size = self.model.get_input_size()
             mouse.set_model_input_size(model_input_size)
             logger.info(f"模型输入大小已设置为: {model_input_size}x{model_input_size}")
-            
+
             # 更新GUI中的捕获窗口大小限制
             try:
                 from ui.main_window import MainWindow
@@ -332,12 +337,12 @@ class Aimbot:
             self.last_config = self._get_current_config()
             self.last_config_check_time = time.time()
             self.last_fps_update_time = time.time()
-            
+
             # 启动预测工作线程
             self._prediction_worker_running = True
             self._prediction_worker_thread = threading.Thread(target=self._prediction_worker, daemon=True)
             self._prediction_worker_thread.start()
-            
+
             return True
         except Exception as e:
             logger.error("初始化失败:\n", exc_info=e)
