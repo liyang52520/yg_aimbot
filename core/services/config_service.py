@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable, List
 from dataclasses import dataclass, field
 from threading import Lock
 import configparser
@@ -56,6 +56,7 @@ class ConfigService:
         self._config = configparser.ConfigParser()
         self._cache: ConfigSection = ConfigSection()
         self._lock = Lock()
+        self._callbacks: List[Callable] = []
         self._load()
 
     def _load(self):
@@ -163,6 +164,25 @@ class ConfigService:
         with self._lock:
             section_dict = getattr(self._cache, section.lower(), {})
             section_dict.update(updates)
+        self._notify_callbacks(section, updates)
+
+    def register_callback(self, callback: Callable):
+        """注册配置变更回调"""
+        if callback not in self._callbacks:
+            self._callbacks.append(callback)
+
+    def unregister_callback(self, callback: Callable):
+        """注销配置变更回调"""
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
+
+    def _notify_callbacks(self, section: str, updates: Dict[str, Any]):
+        """通知所有回调"""
+        for callback in self._callbacks:
+            try:
+                callback(section, updates)
+            except Exception as e:
+                logger.error(f"配置回调执行失败: {e}")
 
 
 config_service = ConfigService()

@@ -5,7 +5,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
 from makcu import create_controller
 
@@ -128,6 +128,12 @@ class AimService:
         self._move_thread = threading.Thread(target=self._move_worker, daemon=True)
         self._move_thread.start()
         self._update_cache()
+        config_service.register_callback(self._on_config_change)
+
+    def _on_config_change(self, section: str, updates: Dict[str, Any]):
+        """配置变更回调"""
+        if section in ('aim', 'mouse', 'capture'):
+            self.update_config()
 
     def _load_config(self) -> MouseConfig:
         """加载配置"""

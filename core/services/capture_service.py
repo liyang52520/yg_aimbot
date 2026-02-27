@@ -1,7 +1,7 @@
 import logging
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 import numpy as np
 import cv2
 import mss
@@ -24,6 +24,12 @@ class ScreenCaptureService:
         self._circle_mask: Optional[np.ndarray] = None
         self._last_config = None
         self._init_monitor()
+        config_service.register_callback(self._on_config_change)
+
+    def _on_config_change(self, section: str, updates: Dict[str, Any]):
+        """配置变更回调"""
+        if section == 'capture':
+            self.check_config_change()
 
     def _init_monitor(self):
         """初始化监控区域"""
