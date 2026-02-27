@@ -10,6 +10,8 @@ class UIConfigManager:
     def load_config(self, ui_components: Dict[str, Any]) -> bool:
         """加载配置到UI组件"""
         try:
+            config_service.begin_loading()
+            
             capture_cfg = config_service.get_section('capture')
             ai_cfg = config_service.get_section('ai')
             aim_cfg = config_service.get_section('aim')
@@ -44,8 +46,10 @@ class UIConfigManager:
             ui_components['mouse_fov_width'].setValue(mouse_cfg.get('fov_width', 40))
             ui_components['mouse_fov_height'].setValue(mouse_cfg.get('fov_height', 40))
 
+            config_service.end_loading()
             return True
         except Exception as e:
+            config_service.end_loading()
             print(f"加载配置失败: {e}")
             return False
 

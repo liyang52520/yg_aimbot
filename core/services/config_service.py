@@ -57,6 +57,7 @@ class ConfigService:
         self._cache: ConfigSection = ConfigSection()
         self._lock = Lock()
         self._callbacks: List[Callable] = []
+        self._loading = False
         self._load()
 
     def _load(self):
@@ -159,12 +160,21 @@ class ConfigService:
         with self._lock:
             return getattr(self._cache, section.lower(), {}).copy()
 
-    def update_section(self, section: str, updates: Dict[str, Any]):
+    def update_section(self, section: str, updates: Dict[str, Any], notify: bool = True):
         """批量更新配置节"""
         with self._lock:
             section_dict = getattr(self._cache, section.lower(), {})
             section_dict.update(updates)
-        self._notify_callbacks(section, updates)
+        if notify and not self._loading:
+            self._notify_callbacks(section, updates)
+
+    def begin_loading(self):
+        """开始批量加载配置，禁用回调"""
+        self._loading = True
+
+    def end_loading(self):
+        """结束批量加载配置，启用回调"""
+        self._loading = False
 
     def register_callback(self, callback: Callable):
         """注册配置变更回调"""
