@@ -16,12 +16,12 @@ from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import QApplication
 
 from core.buttons import Buttons
-from core.capture import capture
+from core.capturer import capture
 from core.config import cfg
 from core.frame_parser import frameParser
 # 导入日志配置
 from core.logger import setup_logger
-from core.ultralytics_yolo_model import UltralyticsYOLOModel
+from core.yolo_model import UltralyticsYOLOModel
 from ui.main_window import MainWindow
 # 从signals.py导入信号实例
 from ui.signals import log_signal, image_signal
@@ -297,7 +297,7 @@ class Aimbot:
             model_path = f"data/{cfg.ai_model_name}"
             self.model = UltralyticsYOLOModel(model_path, cfg.ai_device, cfg.ai_conf)
 
-            if not self.model and not self.model.load_model():
+            if not self.model or not self.model.load_model():
                 logger.error("模型加载失败")
                 return False
 

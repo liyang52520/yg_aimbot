@@ -1,7 +1,6 @@
 import logging
 import threading
 import time
-import ctypes
 from collections import deque
 
 import cv2
@@ -33,22 +32,22 @@ class Capture(threading.Thread):
         self.last_capture_window_width = None
         self.last_capture_window_height = None
         self.config_check_interval = 0.5  # 降低配置检查频率，减少开销
-        
+
         # 预计算的掩码，避免重复计算
         self.circle_mask = None
         self.circle_mask_3ch = None
-        
+
         # 缓存的屏幕中心坐标
         self.screen_x_center = 0
         self.screen_y_center = 0
-        
+
         # 缓存的显示器分辨率
         self.display_width = 1920
         self.display_height = 1080
-        
+
         # 预计算的监控区域
         self.monitor = None
-        
+
         # 帧率控制优化
         self._frame_interval = 1.0 / 60  # 默认60fps
         self._sleep_threshold = 0.001  # 最小休眠阈值
@@ -61,7 +60,7 @@ class Capture(threading.Thread):
         self.sct = mss.mss()
         last_frame_time = time.time()
         config_check_timer = time.time()
-        
+
         # 预分配缓冲区
         frame_buffer = None
 
@@ -149,23 +148,22 @@ class Capture(threading.Thread):
         """转换为圆形图像"""
         try:
             height, width = image.shape[:2]
-            
+
             # 检查是否需要重新创建掩码
-            if (self.circle_mask is None or 
-                self.circle_mask.shape[0] != height or 
-                self.circle_mask.shape[1] != width):
-                
+            if (self.circle_mask is None or
+                    self.circle_mask.shape[0] != height or
+                    self.circle_mask.shape[1] != width):
                 center_x = width >> 1
                 center_y = height >> 1
                 radius = min(width, height) >> 1
-                
+
                 # 创建掩码
                 self.circle_mask = np.zeros((height, width), dtype=np.uint8)
                 cv2.circle(self.circle_mask, (center_x, center_y), radius, 255, -1)
-                
+
                 # 创建三通道掩码
                 self.circle_mask_3ch = cv2.merge([self.circle_mask, self.circle_mask, self.circle_mask])
-            
+
             # 应用掩码
             return cv2.bitwise_and(image, self.circle_mask_3ch)
         except Exception as e:

@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class Config:
     """配置管理类 - 支持热重载"""
-    
+
     def __init__(self):
         self.config = configparser.ConfigParser()
         self._config_path = "config/config.ini"
@@ -20,17 +20,17 @@ class Config:
         self._auto_reload = True
         self._reload_interval = 1.0  # 检查文件变更间隔（秒）
         self._last_check_time = 0.0
-        
+
         # 初始读取
         self.Read(verbose=False)
-    
+
     def _get_file_modified_time(self) -> float:
         """获取配置文件修改时间"""
         try:
             return os.path.getmtime(self._config_path)
         except (OSError, FileNotFoundError):
             return 0.0
-    
+
     def check_reload(self, verbose: bool = False) -> bool:
         """检查并重新加载配置（如果文件已修改）
         
@@ -39,13 +39,13 @@ class Config:
         """
         if not self._auto_reload:
             return False
-            
+
         current_time = time.time()
         # 限制检查频率
         if current_time - self._last_check_time < self._reload_interval:
             return False
         self._last_check_time = current_time
-        
+
         try:
             current_mtime = self._get_file_modified_time()
             if current_mtime > self._last_modified_time:
@@ -62,11 +62,11 @@ class Config:
         except Exception as e:
             logger.error(f"检查配置重载错误: {e}")
         return False
-    
+
     def register_reload_callback(self, callback: Callable):
         """注册配置重载回调函数"""
         self._callbacks.append(callback)
-    
+
     def unregister_reload_callback(self, callback: Callable):
         """注销配置重载回调函数"""
         if callback in self._callbacks:
@@ -121,7 +121,7 @@ class Config:
 
         if verbose:
             logger.info("[Config] 配置已重新加载")
-    
+
     # 辅助方法 - 带类型转换和错误处理
     def _get_str(self, section: str, key: str, fallback: Optional[str] = None) -> str:
         """获取字符串配置值"""
@@ -132,31 +132,36 @@ class Config:
                 return fallback
             logger.error(f"[Config] 配置项缺失 [{section}].{key}: {e}")
             raise
-    
+
     def _get_int(self, section: str, key: str, fallback: Optional[int] = None) -> int:
         """获取整数配置值"""
         try:
-            return self.config.getint(section, key, fallback=fallback) if fallback is not None else self.config.getint(section, key)
+            return self.config.getint(section, key, fallback=fallback) if fallback is not None else self.config.getint(
+                section, key)
         except (configparser.NoSectionError, configparser.NoOptionError, ValueError) as e:
             if fallback is not None:
                 return fallback
             logger.error(f"[Config] 配置项错误或缺失 [{section}].{key}: {e}")
             raise
-    
+
     def _get_float(self, section: str, key: str, fallback: Optional[float] = None) -> float:
         """获取浮点数配置值"""
         try:
-            return self.config.getfloat(section, key, fallback=fallback) if fallback is not None else self.config.getfloat(section, key)
+            return self.config.getfloat(section, key,
+                                        fallback=fallback) if fallback is not None else self.config.getfloat(section,
+                                                                                                             key)
         except (configparser.NoSectionError, configparser.NoOptionError, ValueError) as e:
             if fallback is not None:
                 return fallback
             logger.error(f"[Config] 配置项错误或缺失 [{section}].{key}: {e}")
             raise
-    
+
     def _get_boolean(self, section: str, key: str, fallback: Optional[bool] = None) -> bool:
         """获取布尔配置值"""
         try:
-            return self.config.getboolean(section, key, fallback=fallback) if fallback is not None else self.config.getboolean(section, key)
+            return self.config.getboolean(section, key,
+                                          fallback=fallback) if fallback is not None else self.config.getboolean(
+                section, key)
         except (configparser.NoSectionError, configparser.NoOptionError, ValueError) as e:
             if fallback is not None:
                 return fallback
