@@ -12,6 +12,7 @@ from core.services.capture_service import capture_service
 from core.services.inference_service import inference_service
 from core.services.aim_service import aim_service
 from core.services.tracker_service import tracker_service
+from ui.signals import image_signal
 
 logger = logging.getLogger(__name__)
 
@@ -102,14 +103,16 @@ class Aimbot:
 
                 self._capture_times.append(current_time)
 
+                ai_debug = config_service.get('capture', 'ai_debug', False)
                 need_prediction = self._check_need_prediction()
-
-                if need_prediction:
+                if ai_debug or need_prediction:
                     detections = inference_service.predict(frame)
-
                     if detections is not None:
                         self._prediction_times.append(current_time)
-                        tracker_service.update(detections)
+                        image_signal.detection_result.emit(detections)
+                        if need_prediction:
+                            tracker_service.update(detections)
+                    image_signal.image.emit(frame)
 
                 self._update_fps(current_time)
 
@@ -128,11 +131,11 @@ class Aimbot:
             self._cache_hotkey_codes()
             self._last_hotkeys = hotkeys
 
-    def _check_need_prediction(self) -> bool:
+    def _check_need_prediction(self, ai_debug: bool = False) -> bool:
         """检查是否需要预测"""
-        if config_service.get('capture', 'ai_debug', False):
+        if ai_debug:
             return True
-
+            
         if config_service.get('aim', 'auto', False):
             return True
 
@@ -173,13 +176,17 @@ class Aimbot:
             diff = self._capture_times[-1] - self._capture_times[0]
             if diff > 0:
                 fps = (len(self._capture_times) - 1) / diff
-                logger.debug(f"采集帧率: {fps:.1f} FPS")
+                image_signal.capture_fps.emit(fps)
+        else:
+            image_signal.capture_fps.emit(0.0)
 
         if len(self._prediction_times) >= 2:
             diff = self._prediction_times[-1] - self._prediction_times[0]
             if diff > 0:
                 fps = (len(self._prediction_times) - 1) / diff
-                logger.debug(f"预测帧率: {fps:.1f} FPS")
+                image_signal.predict_fps.emit(fps)
+        else:
+            image_signal.predict_fps.emit(0.0)
 
         self._last_fps_update = current_time
 

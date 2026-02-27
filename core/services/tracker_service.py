@@ -106,21 +106,17 @@ class TargetTrackerService:
             if xyxy.size == 0:
                 return None
 
-            # 确保xyxy是二维数组
             if xyxy.ndim == 1:
                 xyxy = xyxy.reshape(1, -1)
 
-            # 计算中心点和宽高
             cx = (xyxy[:, 0] + xyxy[:, 2]) * 0.5
             cy = (xyxy[:, 1] + xyxy[:, 3]) * 0.5
             w = xyxy[:, 2] - xyxy[:, 0]
             h = xyxy[:, 3] - xyxy[:, 1]
 
-            # 转换为tensor
             xywh_np = np.stack([cx, cy, w, h], axis=1)
             xywh = torch.from_numpy(xywh_np).to(self._arch)
 
-            # 处理class_id
             if hasattr(detections, 'class_id') and detections.class_id is not None:
                 if detections.class_id.ndim == 0:
                     class_id_np = np.array([detections.class_id], dtype=np.float32)
@@ -167,7 +163,6 @@ class TargetTrackerService:
             else:
                 self._last_switch_time = current_time
 
-        # 选择距离最近的目标
         nearest_idx = torch.argmin(distances_sq).item()
         target_data = boxes[nearest_idx].cpu().numpy()
         target_class = int(classes[nearest_idx].item())

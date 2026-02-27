@@ -41,6 +41,7 @@ class MainWindow(QMainWindow):
         # 连接图像信号
         try:
             from ui.signals import image_signal
+            image_signal.image.connect(self.update_video)
             image_signal.capture_fps.connect(self.update_capture_fps)
             image_signal.predict_fps.connect(self.update_predict_fps)
             image_signal.clear_predict_fps.connect(self.clear_predict_fps)

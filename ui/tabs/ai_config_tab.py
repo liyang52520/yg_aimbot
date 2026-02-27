@@ -431,28 +431,28 @@ class AIConfigTab(QWidget):
 
     def update_capture_fps(self, fps):
         """更新采集帧率显示（使用移动平均）"""
-        # 添加到历史记录
-        self.capture_fps_history.append(fps)
-        # 保持历史记录长度
-        if len(self.capture_fps_history) > self.max_history:
-            self.capture_fps_history.pop(0)
-        # 计算移动平均
-        avg_fps = sum(self.capture_fps_history) / len(self.capture_fps_history)
-        # 更新显示
+        if fps <= 0:
+            self.capture_fps_history.clear()
+        else:
+            self.capture_fps_history.append(fps)
+            if len(self.capture_fps_history) > self.max_history:
+                self.capture_fps_history.pop(0)
+        
+        avg_fps = sum(self.capture_fps_history) / len(self.capture_fps_history) if self.capture_fps_history else 0.0
         if self.fps_labels:
             capture_fps_label, _ = self.fps_labels
             capture_fps_label.setText(f"采集帧率: {avg_fps:.1f} FPS")
 
     def update_predict_fps(self, fps):
         """更新预测帧率显示（使用移动平均）"""
-        # 添加到历史记录
-        self.predict_fps_history.append(fps)
-        # 保持历史记录长度
-        if len(self.predict_fps_history) > self.max_history:
-            self.predict_fps_history.pop(0)
-        # 计算移动平均
-        avg_fps = sum(self.predict_fps_history) / len(self.predict_fps_history)
-        # 更新显示
+        if fps <= 0:
+            self.predict_fps_history.clear()
+        else:
+            self.predict_fps_history.append(fps)
+            if len(self.predict_fps_history) > self.max_history:
+                self.predict_fps_history.pop(0)
+        
+        avg_fps = sum(self.predict_fps_history) / len(self.predict_fps_history) if self.predict_fps_history else 0.0
         if self.fps_labels:
             _, predict_fps_label = self.fps_labels
             predict_fps_label.setText(f"预测帧率: {avg_fps:.1f} FPS")
