@@ -229,9 +229,9 @@ class MainWindow(QMainWindow):
 
     def clear_predict_fps(self):
         self.ai_config_tab.clear_predict_fps()
-    
+
     def update_detections(self, detections):
         self.ai_config_tab.update_detections(detections)
-    
+
     def update_capture_window_limits(self, max_size):
         self.ai_config_tab.update_capture_window_limits(max_size)

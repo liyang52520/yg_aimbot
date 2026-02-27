@@ -157,7 +157,7 @@ class ConfigManager:
             # 应用AI配置
             cfg.ai_model_name = ui_components['ai_model_name'].currentText()
             # 重新计算模型类型
-            cfg.ai_model_type = "yolov5" if  cfg.ai_model_name.lower().startswith("yolov5") else "ultralytics"
+            cfg.ai_model_type = "yolov5" if cfg.ai_model_name.lower().startswith("yolov5") else "ultralytics"
             cfg.ai_conf = ui_components['ai_conf'].value()
             cfg.ai_device = str(ui_components['ai_device'].value())
 

@@ -28,7 +28,7 @@ class AIConfigTab(QWidget):
         self.capture_fps_history = []
         self.predict_fps_history = []
         self._setup_ui()
-    
+
     def update_capture_window_limits(self, max_size):
         """更新捕获窗口大小的限制
         
@@ -381,24 +381,26 @@ class AIConfigTab(QWidget):
 
             if self.current_detections is not None and hasattr(self.current_detections, 'xyxy'):
                 xyxy = self.current_detections.xyxy
-                confidence = self.current_detections.confidence if hasattr(self.current_detections, 'confidence') else None
+                confidence = self.current_detections.confidence if hasattr(self.current_detections,
+                                                                           'confidence') else None
                 class_id = self.current_detections.class_id if hasattr(self.current_detections, 'class_id') else None
 
                 for i, box in enumerate(xyxy):
                     x1, y1, x2, y2 = map(int, box)
-                    
+
                     cv2.rectangle(display_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    
+
                     label_parts = []
                     if class_id is not None and i < len(class_id):
                         label_parts.append(f"cls:{class_id[i]}")
                     if confidence is not None and i < len(confidence):
                         label_parts.append(f"{confidence[i]:.2f}")
-                    
+
                     if label_parts:
                         label = " ".join(label_parts)
                         (label_width, label_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                        cv2.rectangle(display_image, (x1, y1 - label_height - 10), (x1 + label_width, y1), (0, 255, 0), -1)
+                        cv2.rectangle(display_image, (x1, y1 - label_height - 10), (x1 + label_width, y1), (0, 255, 0),
+                                      -1)
                         cv2.putText(display_image, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
 
             if len(display_image.shape) == 3:
