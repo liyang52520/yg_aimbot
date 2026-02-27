@@ -1,9 +1,9 @@
+import configparser
 import logging
-from typing import Optional, Dict, Any, Callable, List
+import os
 from dataclasses import dataclass, field
 from threading import Lock
-import configparser
-import os
+from typing import Dict, Any, Callable, List
 
 logger = logging.getLogger(__name__)
 

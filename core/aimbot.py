@@ -7,10 +7,10 @@ from collections import deque
 import numpy as np
 import win32api
 
-from core.services.config_service import config_service
-from core.services.capture_service import capture_service
-from core.services.inference_service import inference_service
 from core.services.aim_service import aim_service
+from core.services.capture_service import capture_service
+from core.services.config_service import config_service
+from core.services.inference_service import inference_service
 from core.services.tracker_service import tracker_service
 from ui.signals import image_signal
 
@@ -40,8 +40,6 @@ class Aimbot:
         self._last_hotkeys = ''
         self._cache_hotkey_codes()
 
-
-
     def _cache_hotkey_codes(self):
         """缓存热键代码"""
         from core.buttons import Buttons
@@ -64,7 +62,7 @@ class Aimbot:
         if not inference_service.load():
             logger.error("异步模型加载失败，无法启动")
             return False
-        
+
         # 启动异步推理服务
         inference_service.start()
 
@@ -112,8 +110,8 @@ class Aimbot:
                 self._capture_times.append(current_time)
 
                 ai_debug = config_service.get('capture', 'ai_debug', False)
-                need_prediction = self._check_need_prediction(ai_debug)
-                
+                need_prediction = self._check_need_prediction()
+
                 if ai_debug or need_prediction:
                     # 异步推理模式
                     await self._handle_async_inference(frame, ai_debug, need_prediction)
@@ -130,22 +128,22 @@ class Aimbot:
         try:
             # 提交帧进行异步推理
             inference_service.submit_frame(frame)
-            
+
             # 获取最新推理结果（非阻塞）
             result = inference_service.get_latest_result()
-            
+
             if result and result.detections is not None:
                 self._prediction_times.append(time.time())
-                
+
                 if ai_debug:
                     image_signal.detection_result.emit(result.detections)
-                
+
                 if need_prediction:
                     tracker_service.update(result.detections)
-            
+
             if ai_debug:
                 image_signal.image.emit(frame)
-                
+
         except Exception as e:
             logger.error(f"异步推理处理错误: {e}")
 
@@ -171,11 +169,8 @@ class Aimbot:
             self._cache_hotkey_codes()
             self._last_hotkeys = hotkeys
 
-    def _check_need_prediction(self, ai_debug: bool = False) -> bool:
+    def _check_need_prediction(self) -> bool:
         """检查是否需要预测"""
-        if ai_debug:
-            return True
-
         if config_service.get('aim', 'auto', False):
             return True
 
@@ -240,7 +235,7 @@ class Aimbot:
 
         capture_service.stop()
         aim_service.stop()
-        
+
         # 卸载推理模型
         inference_service.unload()
 

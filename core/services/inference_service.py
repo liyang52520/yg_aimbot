@@ -1,12 +1,11 @@
 import logging
 import threading
 import time
-from typing import Optional, Callable, Any, Dict, List
-from dataclasses import dataclass, field
 from collections import deque
+from dataclasses import dataclass
+from typing import Optional, Callable, Any, Dict, List
+
 import numpy as np
-import queue
-import asyncio
 
 from core.services.config_service import config_service
 
@@ -35,24 +34,24 @@ class InferenceResult:
 
 class DoubleBuffer:
     """双缓冲管理器"""
-    
+
     def __init__(self, size: int = 3):
         self._size = size
         self._buffers: List[Optional[FrameBuffer]] = [None] * size
         self._current_index = 0
         self._lock = threading.Lock()
         self._frame_counter = 0
-    
+
     def add_frame(self, frame: np.ndarray) -> Optional[int]:
         """添加帧到缓冲区"""
         with self._lock:
             self._frame_counter += 1
             frame_id = self._frame_counter
-            
+
             # 找到最旧的未提交帧或空槽位
             target_index = -1
             oldest_time = float('inf')
-            
+
             for i, buffer in enumerate(self._buffers):
                 if buffer is None:
                     target_index = i
@@ -60,14 +59,14 @@ class DoubleBuffer:
                 elif not buffer.submitted and buffer.timestamp < oldest_time:
                     oldest_time = buffer.timestamp
                     target_index = i
-            
+
             if target_index == -1:
                 # 所有槽位都被占用，丢弃最旧的已处理帧
                 for i, buffer in enumerate(self._buffers):
                     if buffer and buffer.processed:
                         target_index = i
                         break
-            
+
             if target_index != -1:
                 self._buffers[target_index] = FrameBuffer(
                     frame=frame.copy(),
@@ -75,28 +74,28 @@ class DoubleBuffer:
                     timestamp=time.time()
                 )
                 return frame_id
-            
+
             return None
-    
+
     def get_frame_to_process(self) -> Optional[FrameBuffer]:
         """获取待处理的帧"""
         with self._lock:
             # 找到最新的未提交帧
             best_frame = None
             best_index = -1
-            
+
             for i, buffer in enumerate(self._buffers):
                 if buffer and not buffer.submitted:
                     if best_frame is None or buffer.timestamp > best_frame.timestamp:
                         best_frame = buffer
                         best_index = i
-            
+
             if best_frame and best_index != -1:
                 self._buffers[best_index].submitted = True
                 return best_frame
-            
+
             return None
-    
+
     def mark_processed(self, frame_id: int):
         """标记帧已处理"""
         with self._lock:
@@ -104,7 +103,7 @@ class DoubleBuffer:
                 if buffer and buffer.frame_id == frame_id:
                     buffer.processed = True
                     break
-    
+
     def get_latest_frame_id(self) -> Optional[int]:
         """获取最新帧ID"""
         with self._lock:
@@ -112,7 +111,7 @@ class DoubleBuffer:
             for buffer in self._buffers:
                 if buffer and (latest_frame is None or buffer.timestamp > latest_frame.timestamp):
                     latest_frame = buffer
-            
+
             return latest_frame.frame_id if latest_frame else None
 
 
@@ -124,19 +123,19 @@ class AsyncInferenceService:
         self._input_size = 640
         self._device_str = None
         self._running = False
-        
+
         # 双缓冲机制
         self._double_buffer = DoubleBuffer(size=3)
-        
+
         # 工作线程
         self._inference_thread = None
         self._result_thread = None
-        
+
         # 结果管理
         self._latest_result: Optional[InferenceResult] = None
         self._result_lock = threading.Lock()
         self._result_callbacks: List[Callable] = []
-        
+
         # 性能统计
         self._stats = {
             'frame_counter': 0,
@@ -146,7 +145,7 @@ class AsyncInferenceService:
             'queue_waits': deque(maxlen=100),
             'last_inference_time': 0
         }
-        
+
         # 智能降频
         self._enable_adaptive_fps = True
         self._target_inference_time = 0.033  # 目标推理时间 33ms (30 FPS)
@@ -201,28 +200,28 @@ class AsyncInferenceService:
             return
 
         self._running = True
-        
+
         # 启动推理线程
         self._inference_thread = threading.Thread(target=self._inference_worker, daemon=True)
         self._inference_thread.start()
-        
+
         # 启动结果处理线程
         self._result_thread = threading.Thread(target=self._result_worker, daemon=True)
         self._result_thread.start()
-        
+
         logger.info("异步推理服务已启动")
 
     def stop(self):
         """停止服务"""
         self._running = False
-        
+
         # 等待线程结束
         if self._inference_thread and self._inference_thread.is_alive():
             self._inference_thread.join(timeout=3.0)
-        
+
         if self._result_thread and self._result_thread.is_alive():
             self._result_thread.join(timeout=3.0)
-        
+
         logger.info("异步推理服务已停止")
 
     def submit_frame(self, frame: np.ndarray) -> bool:
@@ -242,10 +241,10 @@ class AsyncInferenceService:
             if frame_id is None:
                 self._stats['dropped_frames'] += 1
                 return False
-            
+
             self._stats['frame_counter'] += 1
             return True
-            
+
         except Exception as e:
             logger.error(f"提交帧失败: {e}")
             self._stats['dropped_frames'] += 1
@@ -274,7 +273,7 @@ class AsyncInferenceService:
     def _inference_worker(self):
         """推理工作线程"""
         logger.info("推理工作线程已启动")
-        
+
         while self._running:
             try:
                 # 获取待处理帧
@@ -282,12 +281,12 @@ class AsyncInferenceService:
                 if frame_buffer is None:
                     time.sleep(0.001)  # 没有帧时稍作等待
                     continue
-                
+
                 # 执行推理
                 start_time = time.time()
                 detections = self._run_inference(frame_buffer.frame)
                 inference_time = time.time() - start_time
-                
+
                 # 创建结果
                 result = InferenceResult(
                     frame_id=frame_buffer.frame_id,
@@ -296,26 +295,26 @@ class AsyncInferenceService:
                     processing_time=inference_time,
                     original_frame=frame_buffer.frame if len(self._result_callbacks) > 0 else None
                 )
-                
+
                 # 更新统计
                 self._stats['processed_frames'] += 1
                 self._stats['last_inference_time'] = inference_time
                 self._stats['inference_times'].append(inference_time)
-                
+
                 # 自适应FPS调整
                 if self._enable_adaptive_fps:
                     self._adapt_fps(inference_time)
-                
+
                 # 标记帧已处理
                 self._double_buffer.mark_processed(frame_buffer.frame_id)
-                
+
                 # 更新最新结果
                 with self._result_lock:
                     self._latest_result = result
-                
+
                 # 执行回调
                 self._notify_callbacks(result)
-                
+
             except Exception as e:
                 logger.error(f"推理工作线程错误: {e}")
                 time.sleep(0.1)
@@ -323,12 +322,12 @@ class AsyncInferenceService:
     def _result_worker(self):
         """结果处理工作线程"""
         logger.info("结果处理工作线程已启动")
-        
+
         while self._running:
             try:
                 # 这里可以添加额外的结果处理逻辑
                 time.sleep(0.1)  # 降低CPU占用
-                
+
             except Exception as e:
                 logger.error(f"结果处理工作线程错误: {e}")
 

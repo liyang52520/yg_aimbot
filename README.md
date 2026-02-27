@@ -11,11 +11,13 @@ Only support mss capture;
 Only support makcu;
 
 ### env
+
 - python 3.10
 - cuda 12.8
 - tensorrt 10.9
 
 ### install
+
 ```shell
 pip install --force-reinstall -r requirements.txt
 pip install --force-reinstall torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128
@@ -26,7 +28,9 @@ pip install --force-reinstall install numpy==1.26.4
 ```
 
 ### dlls
-- I rebuild the onnxruntime.dll, it can export onnx model to root dir of C:/ after load, you can use it to export model for encrypted application which use onnxruntime.dll
+
+- I rebuild the onnxruntime.dll, it can export onnx model to root dir of C:/ after load, you can use it to export model
+  for encrypted application which use onnxruntime.dll
 - 我重新编译了onnxruntime.dll，它可以在加载onnx模型时导出onnx模型到c盘根目录，你可以用它来导出加密的应用程序，比如：天机ai
 
 ### models

@@ -2,9 +2,10 @@ import logging
 import threading
 import time
 from typing import Optional, Tuple, Dict, Any
-import numpy as np
+
 import cv2
 import mss
+import numpy as np
 from screeninfo import get_monitors
 
 from core.services.config_service import config_service
@@ -33,25 +34,26 @@ class ScreenCaptureService:
         """配置变更回调"""
         if not self._ready:
             return
-            
+
         if section == 'capture':
             current_config = config_service.get_section('capture')
-            
+
             new_width = current_config.get('window_width', 320)
             new_height = current_config.get('window_height', 320)
-            
+
             current_monitor_width = self._monitor.get('width', 0)
             current_monitor_height = self._monitor.get('height', 0)
-            
-            logger.debug(f"配置变更: 新的宽高={new_width}x{new_height}, 当前监控={current_monitor_width}x{current_monitor_height}")
-            
+
+            logger.debug(
+                f"配置变更: 新的宽高={new_width}x{new_height}, 当前监控={current_monitor_width}x{current_monitor_height}")
+
             if new_width != current_monitor_width or new_height != current_monitor_height:
                 self._init_monitor()
                 self._circle_mask = None
                 logger.info(f"监控区域已更新: {new_width}x{new_height}")
             else:
                 logger.debug("窗口尺寸未变化，跳过重初始化")
-            
+
             self._last_config = current_config.copy()
 
     def _init_monitor(self):
@@ -172,17 +174,17 @@ class ScreenCaptureService:
     def check_config_change(self) -> bool:
         """检查配置是否变更"""
         current_config = config_service.get_section('capture')
-        
+
         if self._last_config is None:
             self._last_config = current_config.copy()
             return False
-        
+
         has_change = False
         for key in current_config:
             if current_config[key] != self._last_config.get(key):
                 has_change = True
                 break
-        
+
         if has_change:
             self._last_config = current_config.copy()
             self._init_monitor()

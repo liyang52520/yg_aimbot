@@ -437,7 +437,7 @@ class AIConfigTab(QWidget):
             self.capture_fps_history.append(fps)
             if len(self.capture_fps_history) > self.max_history:
                 self.capture_fps_history.pop(0)
-        
+
         avg_fps = sum(self.capture_fps_history) / len(self.capture_fps_history) if self.capture_fps_history else 0.0
         if self.fps_labels:
             capture_fps_label, _ = self.fps_labels
@@ -451,7 +451,7 @@ class AIConfigTab(QWidget):
             self.predict_fps_history.append(fps)
             if len(self.predict_fps_history) > self.max_history:
                 self.predict_fps_history.pop(0)
-        
+
         avg_fps = sum(self.predict_fps_history) / len(self.predict_fps_history) if self.predict_fps_history else 0.0
         if self.fps_labels:
             _, predict_fps_label = self.fps_labels

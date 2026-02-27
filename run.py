@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+
 from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import QApplication
 

@@ -5,7 +5,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, Dict, Any
+from typing import Tuple, Dict, Any
 
 from makcu import create_controller
 
@@ -94,7 +94,6 @@ class MouseControlService:
             if device is None:
                 logger.error("鼠标控制器未初始化")
                 return False
-
             device.move(x, y)
             return True
         except Exception as e:
@@ -180,7 +179,7 @@ class AimService:
             self._execute_movement(move_x, move_y)
 
     def _calculate_movement(self, target_x: float, target_y: float,
-                          target_w: float, target_h: float) -> Tuple[float, float]:
+                            target_w: float, target_h: float) -> Tuple[float, float]:
         """计算移动"""
         aim_cfg = config_service.get_section('aim')
 

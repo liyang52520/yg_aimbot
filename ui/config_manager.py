@@ -1,4 +1,3 @@
-import os
 from typing import Dict, Any
 
 from core.services.config_service import config_service
@@ -11,7 +10,7 @@ class UIConfigManager:
         """加载配置到UI组件"""
         try:
             config_service.begin_loading()
-            
+
             capture_cfg = config_service.get_section('capture')
             ai_cfg = config_service.get_section('ai')
             aim_cfg = config_service.get_section('aim')

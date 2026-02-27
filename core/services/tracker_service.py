@@ -1,12 +1,12 @@
 import logging
 import math
 import time
-from typing import Optional
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
-import torch
 import supervision as sv
+import torch
 
 from core.services.config_service import config_service
 
