@@ -297,12 +297,7 @@ class Aimbot:
             model_path = f"data/{cfg.ai_model_name}"
             self.model = UltralyticsYOLOModel(model_path, cfg.ai_device, cfg.ai_conf)
 
-            if not self.model:
-                logger.error("模型加载失败")
-                return False
-
-            # 加载模型
-            if not self.model.load_model():
+            if not self.model and not self.model.load_model():
                 logger.error("模型加载失败")
                 return False
 
