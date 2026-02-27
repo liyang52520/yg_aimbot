@@ -1,0 +1,154 @@
+import logging
+import threading
+import time
+from typing import Optional, Tuple
+import numpy as np
+import cv2
+import mss
+from screeninfo import get_monitors
+
+from core.services.config_service import config_service
+
+logger = logging.getLogger(__name__)
+
+
+class ScreenCaptureService:
+    """屏幕捕获服务"""
+
+    def __init__(self):
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+        self._frame: Optional[np.ndarray] = None
+        self._lock = threading.Lock()
+        self._monitor: dict = {}
+        self._circle_mask: Optional[np.ndarray] = None
+        self._last_config = None
+        self._init_monitor()
+
+    def _init_monitor(self):
+        """初始化监控区域"""
+        try:
+            config = config_service.get_section('capture')
+            width = config.get('window_width', 320)
+            height = config.get('window_height', 320)
+
+            for monitor in get_monitors():
+                if monitor.is_primary:
+                    screen_w, screen_h = monitor.width, monitor.height
+                    left = (screen_w - width) // 2
+                    top = (screen_h - height) // 2
+                    self._monitor = {'left': left, 'top': top, 'width': width, 'height': height}
+                    logger.info(f"监控区域初始化: {width}x{height} @ ({left}, {top})")
+                    break
+        except Exception as e:
+            logger.error(f"初始化监控区域失败: {e}")
+
+    def start(self):
+        """启动捕获"""
+        if self._running:
+            return
+
+        self._running = True
+        self._thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self._thread.start()
+        logger.info("屏幕捕获服务已启动")
+
+    def stop(self):
+        """停止捕获"""
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=1.0)
+        logger.info("屏幕捕获服务已停止")
+
+    def get_frame(self) -> Optional[np.ndarray]:
+        """获取一帧图像"""
+        with self._lock:
+            return self._frame.copy() if self._frame is not None else None
+
+    def get_resolution(self) -> Tuple[int, int]:
+        """获取捕获分辨率"""
+        return self._monitor.get('width', 320), self._monitor.get('height', 320)
+
+    def _capture_loop(self):
+        """捕获循环"""
+        sct = None
+        try:
+            sct = mss.mss()
+            fps = config_service.get('capture', 'fps', 60)
+            interval = 1.0 / fps
+            last_time = time.time()
+
+            while self._running:
+                current_time = time.time()
+                elapsed = current_time - last_time
+
+                if elapsed >= interval:
+                    try:
+                        frame = self._capture_frame(sct)
+                        if frame is not None:
+                            self._process_frame(frame)
+                        last_time = current_time
+                    except Exception as e:
+                        logger.error(f"捕获帧错误: {e}")
+                else:
+                    sleep_time = max(0, interval - elapsed - 0.001)
+                    if sleep_time > 0.001:
+                        time.sleep(sleep_time)
+        except Exception as e:
+            logger.error(f"捕获循环异常: {e}")
+        finally:
+            if sct:
+                try:
+                    sct.close()
+                except:
+                    pass
+
+    def _capture_frame(self, sct: mss.mss) -> Optional[np.ndarray]:
+        """捕获一帧"""
+        try:
+            screenshot = sct.grab(self._monitor)
+            img = np.frombuffer(screenshot.bgra, np.uint8)
+            return img.reshape((screenshot.height, screenshot.width, 4))[:, :, :3]
+        except Exception as e:
+            logger.error(f"捕获帧失败: {e}")
+            return None
+
+    def _process_frame(self, frame: np.ndarray):
+        """处理帧"""
+        try:
+            config = config_service.get_section('capture')
+
+            if config.get('circle', False):
+                frame = self._apply_circle_mask(frame)
+
+            with self._lock:
+                self._frame = frame
+        except Exception as e:
+            logger.error(f"处理帧失败: {e}")
+
+    def _apply_circle_mask(self, frame: np.ndarray) -> np.ndarray:
+        """应用圆形掩码"""
+        height, width = frame.shape[:2]
+
+        if self._circle_mask is None or self._circle_mask.shape != (height, width):
+            center_x, center_y = width // 2, height // 2
+            radius = min(width, height) // 2
+
+            self._circle_mask = np.zeros((height, width), dtype=np.uint8)
+            cv2.circle(self._circle_mask, (center_x, center_y), radius, 255, -1)
+
+        mask_3ch = cv2.merge([self._circle_mask] * 3)
+        return cv2.bitwise_and(frame, mask_3ch)
+
+    def check_config_change(self) -> bool:
+        """检查配置是否变更"""
+        current_config = config_service.get_section('capture')
+        if current_config != self._last_config:
+            self._last_config = current_config.copy()
+            self._init_monitor()
+            self._circle_mask = None
+            return True
+        return False
+
+
+capture_service = ScreenCaptureService()

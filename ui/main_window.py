@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QMessageBox
 )
 
-from .config_manager import ConfigManager
+from .config_manager import UIConfigManager
 from .styles import Styles
 from .tabs import AIConfigTab, AimConfigTab
 from .widgets import LogCapture
@@ -19,7 +19,7 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 700, 500)
 
         # 初始化配置管理器
-        self.config_manager = ConfigManager()
+        self.config_manager = UIConfigManager()
 
         # 设置全局字体
         font = QFont("Segoe UI", 10)
