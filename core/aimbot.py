@@ -109,10 +109,12 @@ class Aimbot:
                     detections = inference_service.predict(frame)
                     if detections is not None:
                         self._prediction_times.append(current_time)
-                        image_signal.detection_result.emit(detections)
+                        if ai_debug:
+                            image_signal.detection_result.emit(detections)
                         if need_prediction:
                             tracker_service.update(detections)
-                    image_signal.image.emit(frame)
+                    if ai_debug:
+                        image_signal.image.emit(frame)
 
                 self._update_fps(current_time)
 
