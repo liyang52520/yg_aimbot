@@ -158,7 +158,13 @@ fov_height = 40
 
 ### Core Services / 核心服务
 
-1. **Capture Service**:
+1. **Config Service**:
+    - Manages application settings
+    - Provides real-time configuration updates
+      **配置服务**：
+    - 管理应用设置
+    - 提供实时配置更新
+2. **Capture Service**:
     - Uses mss for high-performance screen capture
     - Supports configurable capture area
     - Implements circular mask option
@@ -166,8 +172,7 @@ fov_height = 40
     - 使用mss进行高性能屏幕捕获
     - 支持可配置的捕获区域
     - 实现圆形掩码选项
-
-2. **Inference Service**:
+3. **Inference Service**:
     - Asynchronous double-buffered design
     - YOLOv8 model with TensorRT optimization
     - Adaptive FPS for optimal performance
@@ -176,7 +181,13 @@ fov_height = 40
     - 带有TensorRT优化的YOLOv8模型
     - 自适应FPS以获得最佳性能
 
-3. **Aim Service**:
+4. **Tracker Service**:
+    - Tracks detected targets
+    - Improves target selection accuracy
+      **跟踪服务**：
+    - 跟踪检测到的目标
+    - 提高目标选择准确性
+5. **Aim Service**:
     - Precise mouse control using makcu
     - Smooth aiming with customizable parameters
     - Target prediction and tremor effects
@@ -185,36 +196,12 @@ fov_height = 40
     - 可自定义参数的平滑瞄准
     - 目标预测和抖动效果
 
-4. **Tracker Service**:
-    - Tracks detected targets
-    - Improves target selection accuracy
-      **跟踪服务**：
-    - 跟踪检测到的目标
-    - 提高目标选择准确性
-
-5. **Config Service**:
-    - Manages application settings
-    - Provides real-time configuration updates
-      **配置服务**：
-    - 管理应用设置
-    - 提供实时配置更新
-
 ### Flow Diagram / 流程图
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│ Capture Service │ ──> │ Inference Service │ ──> │  Tracker Service │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-                              │                           │
-                              ▼                           ▼
-                        ┌─────────────────┐     ┌─────────────────┐
-                        │  Aim Service   │ <── │ Config Service  │
-                        └─────────────────┘     └─────────────────┘
-                              │
-                              ▼
-                        ┌─────────────────┐
-                        │ Mouse Control   │
-                        └─────────────────┘
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│ Capture Service │ ──> │ Inference Service │ ──> │  Tracker Service │ ──> │  Aim Service   │ ──> │ Mouse Control   │
+└─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘
 ```
 
 ## ❓ FAQ / 常见问题
