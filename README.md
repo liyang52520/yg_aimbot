@@ -1,16 +1,16 @@
 # YG Aimbot / YG 辅助瞄准
 
 <div align="center">
-  <img src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=modern%20gaming%20aimbot%20logo%20with%20crosshair%20and%20AI%20elements%2C%20professional%20design%2C%20blue%20and%20cyan%20colors&image_size=square_hd" alt="YG Aimbot Logo" width="200"/>
+  <img src="ui/resources/aim.svg" alt="YG Aimbot Logo" width="85"/>
 
-  <p>A high-performance, AI-powered aimbot for Apex Legends with advanced features and an intuitive GUI</p>
-  <p>一款高性能、AI驱动的Apex Legends自瞄工具，具有先进功能和直观的GUI界面</p>
+  <p>A high-performance, AI-powered aimbot for FPS with advanced features and an intuitive GUI</p>
+  <p>一款高性能、AI驱动的FPS自瞄工具，具有先进功能和直观的GUI界面</p>
 
   <div>
     <img src="https://img.shields.io/badge/Python-3.10-blue.svg" alt="Python 3.10"/>
     <img src="https://img.shields.io/badge/CUDA-12.8-green.svg" alt="CUDA 12.8"/>
     <img src="https://img.shields.io/badge/TensorRT-10.9-orange.svg" alt="TensorRT 10.9"/>
-    <img src="https://img.shields.io/badge/YOLOv8-darkblue.svg" alt="YOLOv8"/>
+    <img src="https://img.shields.io/badge/Ultralytics-darkblue.svg" alt="Ultralytics"/>
   </div>
 </div>
 
