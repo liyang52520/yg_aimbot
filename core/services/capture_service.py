@@ -25,6 +25,8 @@ class ScreenCaptureService:
         self._circle_mask: Optional[np.ndarray] = None
         self._last_config = None
         self._ready = False
+        self._fps = config_service.get('capture', 'fps', 60)
+        self._interval = 1.0 / self._fps
         self._init_monitor()
         self._last_config = config_service.get_section('capture').copy()
         self._ready = True
@@ -40,19 +42,25 @@ class ScreenCaptureService:
 
             new_width = current_config.get('window_width', 320)
             new_height = current_config.get('window_height', 320)
+            new_fps = current_config.get('fps', 60)
 
             current_monitor_width = self._monitor.get('width', 0)
             current_monitor_height = self._monitor.get('height', 0)
 
             logger.debug(
-                f"配置变更: 新的宽高={new_width}x{new_height}, 当前监控={current_monitor_width}x{current_monitor_height}")
+                f"配置变更: 新的宽高={new_width}x{new_height}, 当前监控={current_monitor_width}x{current_monitor_height}, 新的FPS={new_fps}")
 
             if new_width != current_monitor_width or new_height != current_monitor_height:
                 self._init_monitor()
                 self._circle_mask = None
                 logger.info(f"监控区域已更新: {new_width}x{new_height}")
+            
+            if new_fps != self._fps:
+                self._fps = new_fps
+                self._interval = 1.0 / self._fps
+                logger.info(f"FPS已更新: {new_fps}")
             else:
-                logger.debug("窗口尺寸未变化，跳过重初始化")
+                logger.debug("窗口尺寸和FPS未变化，跳过更新")
 
             self._last_config = current_config.copy()
 
@@ -105,15 +113,13 @@ class ScreenCaptureService:
         sct = None
         try:
             sct = mss.mss()
-            fps = config_service.get('capture', 'fps', 60)
-            interval = 1.0 / fps
             last_time = time.time()
 
             while self._running:
                 current_time = time.time()
                 elapsed = current_time - last_time
 
-                if elapsed >= interval:
+                if elapsed >= self._interval:
                     try:
                         frame = self._capture_frame(sct)
                         if frame is not None:
@@ -122,7 +128,7 @@ class ScreenCaptureService:
                     except Exception as e:
                         logger.error(f"捕获帧错误: {e}")
                 else:
-                    sleep_time = max(0, interval - elapsed - 0.001)
+                    sleep_time = max(0, self._interval - elapsed - 0.001)
                     if sleep_time > 0.001:
                         time.sleep(sleep_time)
         except Exception as e:

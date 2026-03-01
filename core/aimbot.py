@@ -39,6 +39,9 @@ class Aimbot:
         self._cached_hotkey_codes = []
         self._last_hotkeys = ''
         self._cache_hotkey_codes()
+        
+        self._last_frame_time = 0
+        self._frame_interval = 1.0 / config_service.get('capture', 'fps', 60)
 
     def _cache_hotkey_codes(self):
         """缓存热键代码"""
@@ -100,7 +103,15 @@ class Aimbot:
 
                 if current_time - self._last_config_check >= self._config_check_interval:
                     self._check_config()
+                    # 更新帧率限制
+                    new_fps = config_service.get('capture', 'fps', 60)
+                    self._frame_interval = 1.0 / new_fps
                     self._last_config_check = current_time
+
+                # 限制帧率
+                if current_time - self._last_frame_time < self._frame_interval:
+                    await asyncio.sleep(max(0, self._frame_interval - (current_time - self._last_frame_time) - 0.001))
+                    continue
 
                 frame = capture_service.get_frame()
                 if frame is None:
@@ -108,6 +119,7 @@ class Aimbot:
                     continue
 
                 self._capture_times.append(current_time)
+                self._last_frame_time = current_time
 
                 ai_debug = config_service.get('capture', 'ai_debug', False)
                 need_prediction = self._check_need_prediction()
