@@ -162,7 +162,7 @@ class AsyncInferenceService:
             model_path = f"data/{config.get('model_name', 'YOLOv8s_apex_teammate_enemy.engine')}"
             device = config.get('device', '0')
 
-            self._device_str = f"cuda:{device}" if device.isdigit() else device
+            self._device_str = f"xpu" if device.isdigit() else device
 
             self._model = YOLO(model_path, task="detect")
             self._input_size = self._get_model_input_size()
@@ -180,7 +180,7 @@ class AsyncInferenceService:
         """预热模型"""
         try:
             dummy_image = np.zeros((self._input_size, self._input_size, 3), dtype=np.uint8)
-            self._model(dummy_image, conf=0.2, device=self._device_str, verbose=False)
+            self._model(dummy_image, conf=0.2, device="intel:gpu", verbose=False)
             logger.info("异步推理模型预热完成")
         except Exception as e:
             logger.warning(f"异步推理模型预热失败: {e}")
@@ -343,7 +343,7 @@ class AsyncInferenceService:
             results = self._model(
                 image,
                 conf=conf,
-                device=self._device_str,
+                device="intel:gpu",
                 half=True,
                 max_det=3,
                 verbose=False

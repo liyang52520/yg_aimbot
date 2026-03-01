@@ -42,7 +42,7 @@ class TargetTrackerService:
     def _get_arch(self) -> str:
         """获取计算架构"""
         device = config_service.get('ai', 'device', '0')
-        return 'cpu' if 'cpu' in device else f'cuda:{device}'
+        return 'cpu' if 'cpu' in device else f'xpu'
 
     def _update_center_tensor(self):
         """更新中心点张量"""
