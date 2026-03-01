@@ -29,6 +29,7 @@ class Aimbot:
 
         self._capture_times = deque(maxlen=30)
         self._prediction_times = deque(maxlen=30)
+        self._was_predicting = False
 
         self._config_check_interval = 0.2
         self._last_config_check = 0
@@ -111,6 +112,12 @@ class Aimbot:
 
                 ai_debug = config_service.get('capture', 'ai_debug', False)
                 need_prediction = self._check_need_prediction()
+
+                if self._was_predicting and not need_prediction:
+                    self._prediction_times.clear()
+                    image_signal.predict_fps.emit(0.0)
+
+                self._was_predicting = need_prediction
 
                 if ai_debug or need_prediction:
                     # 异步推理模式

@@ -113,28 +113,31 @@ The application uses a config.ini file for persistent settings. You can also con
 ### Example Configuration / 配置示例
 
 ```ini
-[capture]
+[AI]
+model_name = YOLOv8s_apex_teammate_enemy.engine
+conf = 0.2
+device = 0
+
+[Capture]
 window_width = 320
 window_height = 320
-fps = 60
-circle = false
-ai_debug = false
+fps = 240
+circle = False
+ai_debug = True
 
-[ai]
-model_name = YOLOv8s_apex_teammate_enemy.engine
-device = 0
-conf = 0.2
-
-[aim]
-hotkeys = X1MouseButton,X2MouseButton
+[Aim]
+auto = False
 mode = hold
-auto = false
-body_x_offset = 0.1
-body_y_offset = 0.1
+target_cls = 0.0
+body_x_offset = -0.01
+body_y_offset = -0.42
+hotkeys = X1MouseButton,X2MouseButton,RightMouseButton
+max_target_distance = 90
 
-[mouse]
-dpi = 1100
-sensitivity = 3.0
+[Mouse]
+move = makcu
+dpi = 1000
+sensitivity = 5.0
 fov_width = 40
 fov_height = 40
 ```
