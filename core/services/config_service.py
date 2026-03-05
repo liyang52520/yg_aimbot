@@ -51,7 +51,7 @@ class ConfigService:
         }
     }
 
-    def __init__(self, config_path: str = "config/config.ini"):
+    def __init__(self, config_path: str = "./config.ini"):
         self.config_path = config_path
         self._config = configparser.ConfigParser()
         self._cache: ConfigSection = ConfigSection()
