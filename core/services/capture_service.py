@@ -1,6 +1,7 @@
 import logging
 import threading
 import time
+from collections import deque
 from typing import Optional, Tuple, Dict, Any
 
 import cv2
@@ -9,6 +10,7 @@ import numpy as np
 from screeninfo import get_monitors
 
 from core.services.config_service import config_service
+from ui.signals import image_signal
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,12 @@ class ScreenCaptureService:
         self._ready = False
         self._fps = config_service.get('capture', 'fps', 60)
         self._interval = 1.0 / self._fps
+        
+        # 帧率统计
+        self._capture_times = deque(maxlen=30)
+        self._fps_update_interval = 0.03
+        self._last_fps_update = 0
+        
         self._init_monitor()
         self._last_config = config_service.get_section('capture').copy()
         self._ready = True
@@ -124,6 +132,10 @@ class ScreenCaptureService:
                         frame = self._capture_frame(sct)
                         if frame is not None:
                             self._process_frame(frame)
+                            # 记录捕获时间
+                            self._capture_times.append(current_time)
+                            # 更新FPS
+                            self._update_fps(current_time)
                         last_time = current_time
                     except Exception as e:
                         logger.error(f"捕获帧错误: {e}")
@@ -139,6 +151,21 @@ class ScreenCaptureService:
                     sct.close()
                 except:
                     pass
+    
+    def _update_fps(self, current_time: float):
+        """更新捕获帧率"""
+        if current_time - self._last_fps_update < self._fps_update_interval:
+            return
+
+        if len(self._capture_times) >= 2:
+            diff = self._capture_times[-1] - self._capture_times[0]
+            if diff > 0:
+                fps = (len(self._capture_times) - 1) / diff
+                image_signal.capture_fps.emit(fps)
+        else:
+            image_signal.capture_fps.emit(0.0)
+
+        self._last_fps_update = current_time
 
     def _capture_frame(self, sct: mss.mss) -> Optional[np.ndarray]:
         """捕获一帧"""

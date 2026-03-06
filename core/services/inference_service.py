@@ -6,8 +6,11 @@ from dataclasses import dataclass
 from typing import Optional, Callable, Any, Dict, List
 
 import numpy as np
+import supervision as sv
+from ultralytics import YOLO
 
 from core.services.config_service import config_service
+from ui.signals import image_signal
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +149,11 @@ class AsyncInferenceService:
             'last_inference_time': 0
         }
 
+        # 预测帧率统计
+        self._prediction_times = deque(maxlen=30)
+        self._fps_update_interval = 0.03
+        self._last_fps_update = 0
+
         # 智能降频
         self._enable_adaptive_fps = True
         self._target_inference_time = 0.033  # 目标推理时间 33ms (30 FPS)
@@ -155,9 +163,6 @@ class AsyncInferenceService:
     def load(self) -> bool:
         """加载模型"""
         try:
-            from ultralytics import YOLO
-            import supervision as sv
-
             config = config_service.get_section('ai')
             model_path = f"data/{config.get('model_name', 'YOLOv8s_apex_teammate_enemy.engine')}"
             device = config.get('device', '0')
@@ -180,7 +185,7 @@ class AsyncInferenceService:
         """预热模型"""
         try:
             dummy_image = np.zeros((self._input_size, self._input_size, 3), dtype=np.uint8)
-            self._model(dummy_image, conf=0.2, device=self._device_str, verbose=False)
+            self._model(dummy_image, conf=0.2, device=self._device_str)
             logger.info("异步推理模型预热完成")
         except Exception as e:
             logger.warning(f"异步推理模型预热失败: {e}")
@@ -312,6 +317,10 @@ class AsyncInferenceService:
                 with self._result_lock:
                     self._latest_result = result
 
+                # 记录预测时间并更新FPS
+                self._prediction_times.append(time.time())
+                self._update_prediction_fps(time.time())
+
                 # 执行回调
                 self._notify_callbacks(result)
 
@@ -357,7 +366,6 @@ class AsyncInferenceService:
     def _postprocess(self, outputs):
         """后处理"""
         try:
-            import supervision as sv
             for result in outputs:
                 return sv.Detections.from_ultralytics(result)
             return None
@@ -400,6 +408,21 @@ class AsyncInferenceService:
         self._enable_adaptive_fps = enabled
         self._target_inference_time = target_time
         logger.info(f"自适应FPS: {'启用' if enabled else '禁用'}, 目标时间: {target_time}s")
+
+    def _update_prediction_fps(self, current_time: float):
+        """更新预测帧率"""
+        if current_time - self._last_fps_update < self._fps_update_interval:
+            return
+
+        if len(self._prediction_times) >= 2:
+            diff = self._prediction_times[-1] - self._prediction_times[0]
+            if diff > 0:
+                fps = (len(self._prediction_times) - 1) / diff
+                image_signal.predict_fps.emit(fps)
+        else:
+            image_signal.predict_fps.emit(0.0)
+
+        self._last_fps_update = current_time
 
 
 # 全局异步推理服务实例

@@ -27,21 +27,12 @@ class Aimbot:
         self._toggle_enabled = False
         self._key_states = {}
 
-        self._capture_times = deque(maxlen=30)
-        self._prediction_times = deque(maxlen=30)
-
         self._config_check_interval = 0.2
         self._last_config_check = 0
-
-        self._fps_update_interval = 0.03
-        self._last_fps_update = 0
 
         self._cached_hotkey_codes = []
         self._last_hotkeys = ''
         self._cache_hotkey_codes()
-
-        self._last_frame_time = 0
-        self._frame_interval = 1.0 / config_service.get('capture', 'fps', 60)
 
     def _cache_hotkey_codes(self):
         """缓存热键代码"""
@@ -78,7 +69,6 @@ class Aimbot:
 
         self._running = True
         self._last_config_check = time.time()
-        self._last_fps_update = time.time()
 
         logger.info("自瞄应用已启动")
         return True
@@ -103,23 +93,12 @@ class Aimbot:
 
                 if current_time - self._last_config_check >= self._config_check_interval:
                     self._check_config()
-                    # 更新帧率限制
-                    new_fps = config_service.get('capture', 'fps', 60)
-                    self._frame_interval = 1.0 / new_fps
                     self._last_config_check = current_time
-
-                # 限制帧率
-                if current_time - self._last_frame_time < self._frame_interval:
-                    await asyncio.sleep(max(0, self._frame_interval - (current_time - self._last_frame_time) - 0.001))
-                    continue
 
                 frame = capture_service.get_frame()
                 if frame is None:
                     await asyncio.sleep(0.0001)
                     continue
-
-                self._capture_times.append(current_time)
-                self._last_frame_time = current_time
 
                 ai_debug = config_service.get('capture', 'ai_debug', False)
                 need_prediction = self._check_need_prediction()
@@ -128,10 +107,9 @@ class Aimbot:
                     # 异步推理模式
                     await self._handle_async_inference(frame, ai_debug, need_prediction)
                 else:
-                    # 清除预测时间队列，使预测帧率归0
-                    self._prediction_times.clear()
-
-                self._update_fps(current_time)
+                    # 不需要预测时，确保预测帧率为0
+                    inference_service._prediction_times.clear()
+                    image_signal.predict_fps.emit(0.0)
 
                 await asyncio.sleep(0.00001)
 
@@ -148,8 +126,6 @@ class Aimbot:
             result = inference_service.get_latest_result()
 
             if result and result.detections is not None:
-                self._prediction_times.append(time.time())
-
                 if ai_debug:
                     image_signal.detection_result.emit(result.detections)
 
@@ -166,7 +142,6 @@ class Aimbot:
         """处理同步推理（原有逻辑）"""
         detections = inference_service.predict(frame)
         if detections is not None:
-            self._prediction_times.append(time.time())
             if ai_debug:
                 image_signal.detection_result.emit(detections)
             if need_prediction:
@@ -216,28 +191,7 @@ class Aimbot:
 
         return False
 
-    def _update_fps(self, current_time: float):
-        """更新帧率"""
-        if current_time - self._last_fps_update < self._fps_update_interval:
-            return
 
-        if len(self._capture_times) >= 2:
-            diff = self._capture_times[-1] - self._capture_times[0]
-            if diff > 0:
-                fps = (len(self._capture_times) - 1) / diff
-                image_signal.capture_fps.emit(fps)
-        else:
-            image_signal.capture_fps.emit(0.0)
-
-        if len(self._prediction_times) >= 2:
-            diff = self._prediction_times[-1] - self._prediction_times[0]
-            if diff > 0:
-                fps = (len(self._prediction_times) - 1) / diff
-                image_signal.predict_fps.emit(fps)
-        else:
-            image_signal.predict_fps.emit(0.0)
-
-        self._last_fps_update = current_time
 
     def stop(self):
         """停止应用"""
