@@ -91,26 +91,31 @@ class Aimbot:
             try:
                 current_time = time.time()
 
+                # 减少配置检查频率
                 if current_time - self._last_config_check >= self._config_check_interval:
                     self._check_config()
                     self._last_config_check = current_time
 
+                # 获取帧
                 frame, frame_id = capture_service.get_frame()
                 if frame is None:
                     await asyncio.sleep(0.0001)
                     continue
 
-                ai_debug = config_service.get('capture', 'ai_debug', False)
+                # 检查是否需要预测
                 need_prediction = self._check_need_prediction()
+                ai_debug = config_service.get('capture', 'ai_debug', False)
 
                 if ai_debug or need_prediction:
                     # 异步推理模式
                     await self._handle_async_inference(frame, frame_id, ai_debug, need_prediction)
                 else:
                     # 不需要预测时，确保预测帧率为0
-                    inference_service._prediction_times.clear()
-                    image_signal.predict_fps.emit(0.0)
+                    if len(inference_service._prediction_times) > 0:
+                        inference_service._prediction_times.clear()
+                        image_signal.predict_fps.emit(0.0)
 
+                # 减少不必要的休眠
                 await asyncio.sleep(0.00001)
 
             except Exception as e:

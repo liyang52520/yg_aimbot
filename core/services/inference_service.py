@@ -1,4 +1,5 @@
 import logging
+import queue
 import threading
 import time
 from collections import deque
@@ -48,18 +49,13 @@ class AsyncInferenceService:
         self._latest_result: Optional[InferenceResult] = None
         self._result_lock = threading.Lock()
         self._result_callbacks: List[Callable] = []
-
-        # 性能统计
-        self._stats = {
-            'frame_counter': 0,
-            'processed_frames': 0,
-            'inference_times': deque(maxlen=100),
-            'last_inference_time': 0
-        }
+        
+        # 回调队列
+        self._callback_queue = queue.Queue(maxsize=100)
 
         # 预测帧率统计
-        self._prediction_times = deque(maxlen=30)
-        self._fps_update_interval = 0.03
+        self._prediction_times = deque(maxlen=15)
+        self._fps_update_interval = 0.05
         self._last_fps_update = 0
 
         # 帧ID跟踪
@@ -115,7 +111,7 @@ class AsyncInferenceService:
         self._inference_thread = threading.Thread(target=self._inference_worker, daemon=True)
         self._inference_thread.start()
 
-        # 启动结果处理线程
+        # 启动结果处理线程（用于处理回调）
         self._result_thread = threading.Thread(target=self._result_worker, daemon=True)
         self._result_thread.start()
 
@@ -141,11 +137,9 @@ class AsyncInferenceService:
 
         try:
             with self._frame_lock:
-                self._latest_frame = frame.copy()
+                self._latest_frame = frame
                 self._latest_frame_id = frame_id
                 self._latest_frame_timestamp = time.time()
-
-            self._stats['frame_counter'] += 1
             return True
 
         except Exception as e:
@@ -161,16 +155,6 @@ class AsyncInferenceService:
         """添加结果回调"""
         self._result_callbacks.append(callback)
 
-    def get_statistics(self) -> Dict[str, Any]:
-        """获取统计信息"""
-        with self._result_lock:
-            stats = self._stats.copy()
-            stats['avg_inference_time'] = (
-                sum(self._stats['inference_times']) / len(self._stats['inference_times'])
-                if self._stats['inference_times'] else 0
-            )
-            return stats
-
     def _inference_worker(self):
         """推理工作线程"""
         logger.info("推理工作线程已启动")
@@ -178,24 +162,18 @@ class AsyncInferenceService:
         while self._running:
             try:
                 # 获取最新帧
+                # 减少锁持有时间，只在必要时获取锁
                 frame = None
                 frame_id = None
                 timestamp = None
+                has_frame = False
                 
                 with self._frame_lock:
-                    if self._latest_frame is None:
-                        # 没有帧时稍作等待
-                        has_frame = False
-                    else:
-                        # 检查帧ID是否已经处理过
-                        if self._latest_frame_id <= self._last_processed_frame_id:
-                            has_frame = False
-                        else:
-                            # 复制当前帧数据以避免竞争
-                            frame = self._latest_frame.copy()
-                            frame_id = self._latest_frame_id
-                            timestamp = self._latest_frame_timestamp
-                            has_frame = True
+                    if self._latest_frame is not None and self._latest_frame_id > self._last_processed_frame_id:
+                        frame = self._latest_frame
+                        frame_id = self._latest_frame_id
+                        timestamp = self._latest_frame_timestamp
+                        has_frame = True
                 
                 if not has_frame:
                     time.sleep(0.001)  # 没有帧时稍作等待
@@ -215,15 +193,10 @@ class AsyncInferenceService:
                     original_frame=frame if len(self._result_callbacks) > 0 else None
                 )
 
-                # 更新统计
-                self._stats['processed_frames'] += 1
-                self._stats['last_inference_time'] = inference_time
-                self._stats['inference_times'].append(inference_time)
-
-                # 更新最后处理的帧ID
+                # 更新最后处理的帧ID（不需要锁）
                 self._last_processed_frame_id = frame_id
 
-                # 更新最新结果
+                # 更新最新结果（只在必要时获取锁）
                 with self._result_lock:
                     self._latest_result = result
 
@@ -244,8 +217,13 @@ class AsyncInferenceService:
 
         while self._running:
             try:
-                # 这里可以添加额外的结果处理逻辑
-                time.sleep(0.1)  # 降低CPU占用
+                # 处理回调队列
+                try:
+                    result = self._callback_queue.get(timeout=0.01)
+                    self._process_callbacks(result)
+                    self._callback_queue.task_done()
+                except queue.Empty:
+                    pass
 
             except Exception as e:
                 logger.error(f"结果处理工作线程错误: {e}")
@@ -265,7 +243,9 @@ class AsyncInferenceService:
                 device=self._device_str,
                 half=True,
                 max_det=3,
-                verbose=False
+                verbose=False,
+                stream=True,
+                agnostic_nms=True
             )
 
             return self._postprocess(results)
@@ -276,20 +256,29 @@ class AsyncInferenceService:
     def _postprocess(self, outputs):
         """后处理"""
         try:
-            for result in outputs:
+            # 直接获取第一个结果，避免不必要的循环
+            result = next(outputs, None)
+            if result:
                 return sv.Detections.from_ultralytics(result)
             return None
         except Exception as e:
             logger.error(f"异步后处理错误: {e}")
             return None
 
-    def _notify_callbacks(self, result: InferenceResult):
-        """通知回调"""
+    def _process_callbacks(self, result: InferenceResult):
+        """处理回调"""
         for callback in self._result_callbacks:
             try:
                 callback(result)
             except Exception as e:
                 logger.error(f"执行回调失败: {e}")
+
+    def _notify_callbacks(self, result: InferenceResult):
+        """通知回调"""
+        try:
+            self._callback_queue.put_nowait(result)
+        except queue.Full:
+            pass
 
     def unload(self):
         """卸载模型"""
@@ -306,10 +295,11 @@ class AsyncInferenceService:
         if current_time - self._last_fps_update < self._fps_update_interval:
             return
 
-        if len(self._prediction_times) >= 2:
-            diff = self._prediction_times[-1] - self._prediction_times[0]
+        count = len(self._prediction_times)
+        if count >= 2:
+            diff = current_time - self._prediction_times[0]
             if diff > 0:
-                fps = (len(self._prediction_times) - 1) / diff
+                fps = (count - 1) / diff
                 image_signal.predict_fps.emit(fps)
         else:
             image_signal.predict_fps.emit(0.0)
