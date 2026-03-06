@@ -38,6 +38,7 @@ class TargetTrackerService:
         self._arch = self._get_arch()
         self._center_tensor = None
         self._update_center_tensor()
+        self._last_processed_frame_id = -1
 
     def _get_arch(self) -> str:
         """获取计算架构"""
@@ -56,14 +57,19 @@ class TargetTrackerService:
             dtype=torch.float32
         )
 
-    def update(self, detections):
+    def update(self, detections, frame_id=-1):
         """更新检测结果"""
+        # 检查frame_id是否已经处理过
+        if frame_id != -1 and frame_id <= self._last_processed_frame_id:
+            return
+
         current_time = time.time()
 
         if current_time - self._last_process_time < self._min_process_interval:
             return
 
         self._last_process_time = current_time
+        self._last_processed_frame_id = frame_id
 
         try:
             if isinstance(detections, sv.Detections):

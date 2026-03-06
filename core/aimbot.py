@@ -130,7 +130,7 @@ class Aimbot:
                     image_signal.detection_result.emit(result.detections)
 
                 if need_prediction:
-                    tracker_service.update(result.detections)
+                    tracker_service.update(result.detections, result.frame_id)
 
             if ai_debug:
                 image_signal.image.emit(frame)
