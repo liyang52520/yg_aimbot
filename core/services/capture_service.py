@@ -22,6 +22,7 @@ class ScreenCaptureService:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._frame: Optional[np.ndarray] = None
+        self._frame_id: Optional[int] = None
         self._lock = threading.Lock()
         self._monitor: dict = {}
         self._circle_mask: Optional[np.ndarray] = None
@@ -130,9 +131,8 @@ class ScreenCaptureService:
     def get_frame(self) -> Optional[tuple[np.ndarray, int]]:
         """获取一帧图像和帧ID"""
         with self._lock:
-            if self._frame is not None:
-                frame_id = self._generate_frame_id()
-                return self._frame.copy(), frame_id
+            if self._frame is not None and self._frame_id is not None:
+                return self._frame.copy(), self._frame_id
             return None, None
 
     def get_resolution(self) -> Tuple[int, int]:
@@ -209,8 +209,10 @@ class ScreenCaptureService:
             if config.get('circle', False):
                 frame = self._apply_circle_mask(frame)
 
+            frame_id = self._generate_frame_id()
             with self._lock:
                 self._frame = frame
+                self._frame_id = frame_id
         except Exception as e:
             logger.error(f"处理帧失败: {e}")
 
