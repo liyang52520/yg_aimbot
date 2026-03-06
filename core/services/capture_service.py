@@ -159,7 +159,8 @@ class ScreenCaptureService:
                             self._capture_times.append(current_time)
                             # 更新FPS
                             self._update_fps(current_time)
-                        last_time = current_time
+                        # 使用累加_interval的方式更新last_time，确保帧率稳定
+                        last_time += self._interval
                     except Exception as e:
                         logger.error(f"捕获帧错误: {e}")
                 else:
