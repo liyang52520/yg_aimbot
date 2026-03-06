@@ -35,6 +35,10 @@ class ScreenCaptureService:
         self._fps_update_interval = 0.03
         self._last_fps_update = 0
         
+        # 帧ID生成
+        self._last_second = -1
+        self._frame_id_counter = 0
+        
         self._init_monitor()
         self._last_config = config_service.get_section('capture').copy()
         self._ready = True
@@ -107,10 +111,29 @@ class ScreenCaptureService:
             self._thread.join(timeout=1.0)
         logger.info("屏幕捕获服务已停止")
 
-    def get_frame(self) -> Optional[np.ndarray]:
-        """获取一帧图像"""
+    def _generate_frame_id(self) -> int:
+        """生成帧ID，基于时间的雪花算法"""
+        current_time = time.time()
+        current_second = int(current_time)
+        
+        # 如果是新的秒，重置计数器
+        if current_second != self._last_second:
+            self._last_second = current_second
+            self._frame_id_counter = 0
+        else:
+            self._frame_id_counter += 1
+        
+        # 生成帧ID：秒数左移20位 + 计数器
+        frame_id = (current_second << 20) | self._frame_id_counter
+        return frame_id
+
+    def get_frame(self) -> Optional[tuple[np.ndarray, int]]:
+        """获取一帧图像和帧ID"""
         with self._lock:
-            return self._frame.copy() if self._frame is not None else None
+            if self._frame is not None:
+                frame_id = self._generate_frame_id()
+                return self._frame.copy(), frame_id
+            return None, None
 
     def get_resolution(self) -> Tuple[int, int]:
         """获取捕获分辨率"""

@@ -45,12 +45,9 @@ class DoubleBuffer:
         self._lock = threading.Lock()
         self._frame_counter = 0
 
-    def add_frame(self, frame: np.ndarray) -> Optional[int]:
+    def add_frame(self, frame: np.ndarray, frame_id: int) -> bool:
         """添加帧到缓冲区"""
         with self._lock:
-            self._frame_counter += 1
-            frame_id = self._frame_counter
-
             # 找到最旧的未提交帧或空槽位
             target_index = -1
             oldest_time = float('inf')
@@ -76,9 +73,9 @@ class DoubleBuffer:
                     frame_id=frame_id,
                     timestamp=time.time()
                 )
-                return frame_id
+                return True
 
-            return None
+            return False
 
     def get_frame_to_process(self) -> Optional[FrameBuffer]:
         """获取待处理的帧"""
@@ -159,6 +156,9 @@ class AsyncInferenceService:
         self._target_inference_time = 0.033  # 目标推理时间 33ms (30 FPS)
         self._current_skip_rate = 1  # 当前跳帧率
         self._frame_skip_counter = 0
+        
+        # 帧ID跟踪
+        self._last_processed_frame_id = -1
 
     def load(self) -> bool:
         """加载模型"""
@@ -229,7 +229,7 @@ class AsyncInferenceService:
 
         logger.info("异步推理服务已停止")
 
-    def submit_frame(self, frame: np.ndarray) -> bool:
+    def submit_frame(self, frame: np.ndarray, frame_id: int) -> bool:
         """提交帧进行推理"""
         if not self._running or frame is None:
             return False
@@ -242,8 +242,8 @@ class AsyncInferenceService:
             self._frame_skip_counter = 0
 
         try:
-            frame_id = self._double_buffer.add_frame(frame)
-            if frame_id is None:
+            added = self._double_buffer.add_frame(frame, frame_id)
+            if not added:
                 self._stats['dropped_frames'] += 1
                 return False
 
@@ -287,6 +287,12 @@ class AsyncInferenceService:
                     time.sleep(0.001)  # 没有帧时稍作等待
                     continue
 
+                # 检查帧ID是否已经处理过
+                if frame_buffer.frame_id <= self._last_processed_frame_id:
+                    logger.debug(f"跳过已处理的帧，帧ID: {frame_buffer.frame_id}")
+                    self._double_buffer.mark_processed(frame_buffer.frame_id)
+                    continue
+
                 # 执行推理
                 start_time = time.time()
                 detections = self._run_inference(frame_buffer.frame)
@@ -312,6 +318,9 @@ class AsyncInferenceService:
 
                 # 标记帧已处理
                 self._double_buffer.mark_processed(frame_buffer.frame_id)
+                
+                # 更新最后处理的帧ID
+                self._last_processed_frame_id = frame_buffer.frame_id
 
                 # 更新最新结果
                 with self._result_lock:

@@ -95,7 +95,7 @@ class Aimbot:
                     self._check_config()
                     self._last_config_check = current_time
 
-                frame = capture_service.get_frame()
+                frame, frame_id = capture_service.get_frame()
                 if frame is None:
                     await asyncio.sleep(0.0001)
                     continue
@@ -105,7 +105,7 @@ class Aimbot:
 
                 if ai_debug or need_prediction:
                     # 异步推理模式
-                    await self._handle_async_inference(frame, ai_debug, need_prediction)
+                    await self._handle_async_inference(frame, frame_id, ai_debug, need_prediction)
                 else:
                     # 不需要预测时，确保预测帧率为0
                     inference_service._prediction_times.clear()
@@ -116,11 +116,11 @@ class Aimbot:
             except Exception as e:
                 logger.error(f"主循环错误: {e}")
 
-    async def _handle_async_inference(self, frame: np.ndarray, ai_debug: bool, need_prediction: bool):
+    async def _handle_async_inference(self, frame: np.ndarray, frame_id: int, ai_debug: bool, need_prediction: bool):
         """处理异步推理"""
         try:
             # 提交帧进行异步推理
-            inference_service.submit_frame(frame)
+            inference_service.submit_frame(frame, frame_id)
 
             # 获取最新推理结果（非阻塞）
             result = inference_service.get_latest_result()
