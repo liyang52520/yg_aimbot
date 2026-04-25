@@ -1,4 +1,3 @@
-asyncio==4.0.0
 bettercam==1.0.0
 keyboard==0.13.5
 makcu==2.3.1

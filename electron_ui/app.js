@@ -1,5 +1,3 @@
-const { ipcRenderer } = require('electron');
-
 new Vue({
   el: '#app',
   data() {
@@ -17,7 +15,6 @@ new Vue({
       selectedHotkeys: [],
       isDragging: false,
       
-      // WebSocket
       ws: null,
       wsConnected: false,
       wsReconnectTimer: null,
@@ -54,18 +51,6 @@ new Vue({
       }
     };
   },
-  computed: {
-    crosshairStyle() {
-      const canvasSize = 140;
-      const x = (this.config.aim.body_x_offset + 1) / 2 * canvasSize;
-      const y = (this.config.aim.body_y_offset + 1) / 2 * canvasSize;
-      return {
-        left: `${x}px`,
-        top: `${y}px`,
-        transform: 'translate(-50%, -50%)'
-      };
-    }
-  },
   mounted() {
     this.connectWebSocket();
     this.scanModels();
@@ -74,7 +59,6 @@ new Vue({
     });
     this.setupLogCapture();
     
-    // 监听窗口大小变化，重新绘制检测框
     window.addEventListener('resize', this.onWindowResize);
   },
   beforeDestroy() {
@@ -87,7 +71,6 @@ new Vue({
     window.removeEventListener('resize', this.onWindowResize);
   },
   methods: {
-    // ===== WebSocket 连接 =====
     connectWebSocket() {
       const wsUrl = 'ws://127.0.0.1:8765';
       
@@ -96,8 +79,6 @@ new Vue({
         
         this.ws.onopen = () => {
           this.wsConnected = true;
-          
-          // 请求当前配置
           this.sendCommand('get-config');
         };
         
@@ -112,8 +93,6 @@ new Vue({
         
         this.ws.onclose = () => {
           this.wsConnected = false;
-          
-          // 自动重连
           this.wsReconnectTimer = setTimeout(() => {
             this.connectWebSocket();
           }, 3000);
@@ -135,9 +114,8 @@ new Vue({
         }
         this.ws.send(JSON.stringify(message));
         return true;
-      } else {
-        return false;
       }
+      return false;
     },
     
     handleWebSocketMessage(message) {
@@ -171,14 +149,11 @@ new Vue({
           this.saving = false;
           break;
         default:
-          // 忽略未知消息类型
           break;
       }
     },
     
-    // ===== 数据处理 =====
     handleConfigReceived(config) {
-      
       if (config.ai) {
         this.config.ai = { ...this.config.ai, ...config.ai };
       }
@@ -192,17 +167,14 @@ new Vue({
         this.config.mouse = { ...this.config.mouse, ...config.mouse };
       }
       
-      // 更新热键选择
       if (config.aim && config.aim.hotkeys) {
         this.selectedHotkeys = config.aim.hotkeys.split(',').filter(h => h);
       }
       
-      // 更新视频监控状态
       if (config.capture) {
         this.videoEnabled = config.capture.ai_debug || false;
       }
       
-      // 重新绘制偏移画布
       this.$nextTick(() => {
         this.drawOffsetCanvas();
       });
@@ -228,12 +200,10 @@ new Vue({
     },
     
     handleDetections(detections) {
-      // 更新检测目标数量
       if (Array.isArray(detections)) {
         this.detectionCount = detections.length;
         this.detections = detections;
         
-        // 绘制检测框 - 使用requestAnimationFrame确保流畅
         requestAnimationFrame(() => {
           this.drawDetections();
         });
@@ -241,7 +211,6 @@ new Vue({
     },
     
     onVideoLoad() {
-      // 视频加载完成后绘制检测框
       requestAnimationFrame(() => {
         this.drawDetections();
       });
@@ -252,9 +221,7 @@ new Vue({
       const img = this.$el.querySelector('.video-frame');
       if (!canvas || !img || !this.videoFrame) return;
       
-      // 确保图片已加载
       if (!img.complete || img.naturalWidth === 0) {
-        // 图片未完全加载，延迟重试
         setTimeout(() => this.drawDetections(), 100);
         return;
       }
@@ -262,16 +229,13 @@ new Vue({
       const ctx = canvas.getContext('2d');
       const container = canvas.parentElement;
       
-      // 设置canvas尺寸与容器相同
       canvas.width = container.clientWidth;
       canvas.height = container.clientHeight;
       
-      // 清空画布
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
       if (!this.detections || this.detections.length === 0) return;
       
-      // 计算缩放比例（因为图片使用了object-fit: contain）
       const imgNaturalWidth = img.naturalWidth || this.config.capture.window_width;
       const imgNaturalHeight = img.naturalHeight || this.config.capture.window_height;
       const imgRatio = imgNaturalWidth / imgNaturalHeight;
@@ -280,18 +244,15 @@ new Vue({
       let scaleX, scaleY, offsetX = 0, offsetY = 0;
       
       if (imgRatio > containerRatio) {
-        // 图片宽度填满容器
         scaleX = canvas.width / imgNaturalWidth;
         scaleY = scaleX;
         offsetY = (canvas.height - imgNaturalHeight * scaleY) / 2;
       } else {
-        // 图片高度填满容器
         scaleY = canvas.height / imgNaturalHeight;
         scaleX = scaleY;
         offsetX = (canvas.width - imgNaturalWidth * scaleX) / 2;
       }
       
-      // 绘制每个检测框
       this.detections.forEach((det, index) => {
         const box = det.box;
         if (!box || box.length < 4) return;
@@ -303,21 +264,17 @@ new Vue({
         const width = x2 - x1;
         const height = y2 - y1;
         
-        // 根据类别选择颜色
         const classId = det.class_id || 0;
         const colors = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#909399', '#606266'];
         const color = colors[classId % colors.length];
         
-        // 绘制边框
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.strokeRect(x1, y1, width, height);
         
-        // 绘制填充背景（半透明）
-        ctx.fillStyle = color + '20'; // 添加透明度
+        ctx.fillStyle = color + '20';
         ctx.fillRect(x1, y1, width, height);
         
-        // 绘制标签背景
         const label = `类别${classId} ${(det.confidence * 100).toFixed(0)}%`;
         ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
         const textWidth = ctx.measureText(label).width;
@@ -326,14 +283,12 @@ new Vue({
         ctx.fillStyle = color;
         ctx.fillRect(x1, y1 - textHeight - 2, textWidth + 8, textHeight + 4);
         
-        // 绘制标签文字
         ctx.fillStyle = '#ffffff';
         ctx.fillText(label, x1 + 4, y1 - 4);
       });
     },
     
-    // ===== 配置操作 =====
-    async saveConfig() {
+    saveConfig() {
       this.saving = true;
       this.config.aim.hotkeys = this.selectedHotkeys.join(',');
       this.config.capture.ai_debug = this.videoEnabled;
@@ -346,7 +301,6 @@ new Vue({
         return;
       }
       
-      // 5秒超时
       setTimeout(() => {
         if (this.saving) {
           this.$message.error('保存超时，请重试');
@@ -383,7 +337,6 @@ new Vue({
         this.videoFrame = '';
         this.detectionCount = 0;
         this.detections = [];
-        // 清空检测框
         const canvas = this.$refs.detectionCanvas;
         if (canvas) {
           const ctx = canvas.getContext('2d');
@@ -393,7 +346,6 @@ new Vue({
     },
     
     onWindowResize() {
-      // 窗口大小变化时重新绘制检测框
       this.$nextTick(() => {
         this.drawDetections();
       });
@@ -404,7 +356,6 @@ new Vue({
       this.autoApply();
     },
     
-    // ===== 可视化 =====
     drawOffsetCanvas() {
       const canvas = this.$refs.offsetCanvas;
       if (!canvas) return;
@@ -413,11 +364,9 @@ new Vue({
       const width = canvas.width;
       const height = canvas.height;
 
-      // 清空画布
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, width, height);
 
-      // 绘制网格
       ctx.strokeStyle = '#e4e7ed';
       ctx.lineWidth = 1;
       
@@ -434,7 +383,6 @@ new Vue({
         ctx.stroke();
       }
 
-      // 绘制中心十字
       const centerX = width / 2;
       const centerY = height / 2;
       
@@ -451,30 +399,25 @@ new Vue({
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // 绘制完整人体轮廓（带头、躯干、手臂、腿）
       ctx.strokeStyle = '#909399';
       ctx.lineWidth = 2;
       
-      // 头部 - 位于画布上部
       const headY = centerY - 45;
       ctx.beginPath();
       ctx.ellipse(centerX, headY, 12, 14, 0, 0, Math.PI * 2);
       ctx.stroke();
       
-      // 颈部
       ctx.beginPath();
       ctx.moveTo(centerX, headY + 14);
       ctx.lineTo(centerX, headY + 20);
       ctx.stroke();
       
-      // 躯干 - 矩形，稍微宽一点
       const bodyTop = headY + 20;
       const bodyHeight = 38;
       ctx.beginPath();
       ctx.roundRect(centerX - 16, bodyTop, 32, bodyHeight, 4);
       ctx.stroke();
       
-      // 手臂 - 左右各一条
       const shoulderY = bodyTop + 5;
       ctx.beginPath();
       ctx.moveTo(centerX - 16, shoulderY);
@@ -485,7 +428,6 @@ new Vue({
       ctx.lineTo(centerX + 28, shoulderY + 22);
       ctx.stroke();
       
-      // 腿部 - 左右各一条
       const hipY = bodyTop + bodyHeight;
       ctx.beginPath();
       ctx.moveTo(centerX - 8, hipY);
@@ -496,19 +438,16 @@ new Vue({
       ctx.lineTo(centerX + 10, hipY + 35);
       ctx.stroke();
 
-      // 绘制瞄准点
       const offsetX = this.config.aim.body_x_offset;
       const offsetY = this.config.aim.body_y_offset;
       const aimX = centerX + offsetX * 50;
       const aimY = centerY + offsetY * 55;
 
-      // 瞄准点圆圈
       ctx.fillStyle = '#f56c6c';
       ctx.beginPath();
       ctx.arc(aimX, aimY, 6, 0, Math.PI * 2);
       ctx.fill();
 
-      // 绘制十字瞄准线
       ctx.strokeStyle = '#f56c6c';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -545,7 +484,6 @@ new Vue({
       const centerX = canvas.width / 2;
       const centerY = canvas.height / 2;
       
-      // 限制范围并保留两位小数
       const rawX = Math.max(-1, Math.min(1, (x - centerX) / 50));
       const rawY = Math.max(-1, Math.min(1, (y - centerY) / 55));
       
@@ -556,7 +494,6 @@ new Vue({
       this.autoApply();
     },
     
-    // ===== 日志处理 =====
     getLogClass(log) {
       if (log.includes('[ERROR]')) return 'error';
       if (log.includes('[WARN]')) return 'warn';
@@ -573,7 +510,6 @@ new Vue({
       return log.replace(/^\[\d{1,2}:\d{2}:\d{2}\]\s*/, '');
     },
     
-    // ===== 日志捕获 =====
     setupLogCapture() {
       const originalLog = console.log;
       const originalError = console.error;

@@ -90,7 +90,7 @@
                 </div>
               </div>
             </div>
-            <div class="video-footer" v-if="videoEnabled">
+            <div class="video-footer">
               <div class="video-info">
                 <span class="info-item">
                   <i class="el-icon-monitor"></i>
@@ -100,7 +100,7 @@
                   <i class="el-icon-refresh"></i>
                   {{ config.capture.fps }} FPS
                 </span>
-                <span class="info-item" v-if="videoFrame">
+                <span class="info-item" v-if="videoEnabled && videoFrame">
                   <i class="el-icon-picture-outline"></i>
                   JPEG 编码
                 </span>

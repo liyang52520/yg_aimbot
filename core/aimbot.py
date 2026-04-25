@@ -2,7 +2,6 @@ import asyncio
 import logging
 import threading
 import time
-from collections import deque
 
 import numpy as np
 import win32api
@@ -146,21 +145,6 @@ class Aimbot:
         except Exception as e:
             logger.error(f"异步推理处理错误: {e}")
 
-    async def _handle_sync_inference(self, frame: np.ndarray, ai_debug: bool, need_prediction: bool):
-        """处理同步推理（原有逻辑）"""
-        detections = inference_service.predict(frame)
-        if detections is not None:
-            if ai_debug:
-                image_signal.emit_detections(detections)
-                image_signal.emit_video_frame(frame)
-            if need_prediction:
-                tracker_service.update(detections)
-        else:
-            # 没有检测到目标，发送空数组清空检测框
-            if ai_debug:
-                image_signal.emit_detections([])
-                image_signal.emit_video_frame(frame)
-
     def _check_config(self):
         """检查配置变更"""
         capture_service.check_config_change()
@@ -202,8 +186,6 @@ class Aimbot:
                     logger.error(f"热键检查错误: {e}")
 
         return False
-
-
 
     def stop(self):
         """停止应用"""

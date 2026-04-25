@@ -124,7 +124,3 @@ class Buttons:
         'StartApplication1': 182,
         'StartApplication2': 183
     }
-
-    @classmethod
-    def get_key_code(cls, key_name):
-        return cls.KEY_CODES.get(key_name, None)
