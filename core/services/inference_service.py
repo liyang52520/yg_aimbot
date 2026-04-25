@@ -11,7 +11,7 @@ import supervision as sv
 from ultralytics import YOLO
 
 from core.services.config_service import config_service
-from ui.signals import image_signal
+from core.ui_bridge import ui_bridge as image_signal
 
 logger = logging.getLogger(__name__)
 
@@ -300,9 +300,9 @@ class AsyncInferenceService:
             diff = current_time - self._prediction_times[0]
             if diff > 0:
                 fps = (count - 1) / diff
-                image_signal.predict_fps.emit(fps)
+                image_signal.emit_fps(predict_fps=fps)
         else:
-            image_signal.predict_fps.emit(0.0)
+            image_signal.emit_fps(predict_fps=0.0)
 
         self._last_fps_update = current_time
 

@@ -12,7 +12,7 @@ from core.services.capture_service import capture_service
 from core.services.config_service import config_service
 from core.services.inference_service import inference_service
 from core.services.tracker_service import tracker_service
-from ui.signals import image_signal
+from core.ui_bridge import ui_bridge as image_signal
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ class Aimbot:
                     # 不需要预测时，确保预测帧率为0
                     if len(inference_service._prediction_times) > 0:
                         inference_service._prediction_times.clear()
-                        image_signal.predict_fps.emit(0.0)
+                        image_signal.emit_fps(predict_fps=0.0)
 
                 # 减少不必要的休眠
                 await asyncio.sleep(0.00001)
@@ -132,13 +132,16 @@ class Aimbot:
 
             if result and result.detections is not None:
                 if ai_debug:
-                    image_signal.detection_result.emit(result.detections)
+                    image_signal.emit_detections(result.detections)
+                    image_signal.emit_video_frame(frame)
 
                 if need_prediction:
                     tracker_service.update(result.detections, result.frame_id)
-
-            if ai_debug:
-                image_signal.image.emit(frame)
+            else:
+                # 没有检测到目标，发送空数组清空检测框
+                if ai_debug:
+                    image_signal.emit_detections([])
+                    image_signal.emit_video_frame(frame)
 
         except Exception as e:
             logger.error(f"异步推理处理错误: {e}")
@@ -148,11 +151,15 @@ class Aimbot:
         detections = inference_service.predict(frame)
         if detections is not None:
             if ai_debug:
-                image_signal.detection_result.emit(detections)
+                image_signal.emit_detections(detections)
+                image_signal.emit_video_frame(frame)
             if need_prediction:
                 tracker_service.update(detections)
-        if ai_debug:
-            image_signal.image.emit(frame)
+        else:
+            # 没有检测到目标，发送空数组清空检测框
+            if ai_debug:
+                image_signal.emit_detections([])
+                image_signal.emit_video_frame(frame)
 
     def _check_config(self):
         """检查配置变更"""

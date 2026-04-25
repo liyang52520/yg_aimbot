@@ -49,7 +49,7 @@
 | Python      | 3.10    | Python      | 3.10 |
 | CUDA        | 12.8    | CUDA        | 12.8 |
 | TensorRT    | 10.9    | TensorRT    | 10.9 |
-| PyQt6       | Latest  | PyQt6       | 最新版  |
+| Electron    | Latest  | Electron    | 最新版  |
 | Ultralytics | Latest  | Ultralytics | 最新版  |
 | mss         | Latest  | mss         | 最新版  |
 | makcu       | Latest  | makcu       | 最新版  |
@@ -80,6 +80,14 @@ pip install ./tensorrt-10.9.0.34-cp310-none-win_amd64.whl
 
 ```bash
 pip install --force-reinstall numpy==1.26.4
+```
+
+### Step 5: Install Electron UI / 步骤5：安装 Electron UI
+
+```bash
+cd electron_ui
+npm install
+cd ..
 ```
 
 ## 🚀 Quick Start / 快速开始

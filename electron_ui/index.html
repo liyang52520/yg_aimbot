@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YG Aimbot Configurator</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部状态栏 -->
+    <header class="status-bar">
+      <div class="status-brand">
+        <div class="brand-logo">
+          <span class="logo-icon">🎯</span>
+        </div>
+        <div class="brand-info">
+          <span class="brand-name">YG Aimbot</span>
+          <span class="brand-version">v2.0</span>
+        </div>
+      </div>
+      <div class="status-metrics">
+        <div class="metric-item" v-if="captureFps > 0">
+          <div class="metric-value blue">{{ captureFps.toFixed(0) }}</div>
+          <div class="metric-label">采集 FPS</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-value orange">{{ predictFps.toFixed(0) }}</div>
+          <div class="metric-label">推理 FPS</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-dot" :class="{ online: wsConnected, offline: !wsConnected }"></div>
+          <div class="metric-label">{{ wsConnected ? '已连接' : '未连接' }}</div>
+        </div>
+        <div class="header-actions">
+          <el-button 
+            type="primary" 
+            size="small" 
+            :loading="saving"
+            icon="el-icon-check"
+            @click="saveConfig">
+            {{ saving ? '保存中' : '保存配置' }}
+          </el-button>
+        </div>
+      </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="main-container">
+      <div class="content-wrapper">
+        <!-- 左侧：视频监控 -->
+        <aside class="left-panel">
+          <div class="panel-card video-section">
+            <div class="card-header">
+              <div class="header-title">
+                <i class="el-icon-video-camera"></i>
+                <span>实时视频监控</span>
+              </div>
+              <el-switch 
+                v-model="videoEnabled" 
+                @change="onVideoDebugChanged" 
+                active-color="#409eff"
+                inactive-color="#dcdfe6">
+              </el-switch>
+            </div>
+            <div class="video-content">
+              <div v-if="!videoEnabled" class="video-placeholder">
+                <div class="placeholder-content">
+                  <div class="placeholder-icon">
+                    <i class="el-icon-video-camera"></i>
+                  </div>
+                  <p class="placeholder-text">视频监控已关闭</p>
+                </div>
+              </div>
+              <div v-else-if="!videoFrame" class="video-placeholder loading">
+                <div class="placeholder-content">
+                  <i class="el-icon-loading loading-icon"></i>
+                  <p class="placeholder-text">正在连接视频源...</p>
+                </div>
+              </div>
+              <div v-else class="video-frame-container">
+                <img :src="videoFrame" class="video-frame" alt="Video Feed" @load="onVideoLoad">
+                <canvas ref="detectionCanvas" class="detection-canvas"></canvas>
+                <div class="video-overlay" v-if="detectionCount > 0">
+                  <span class="detection-badge">
+                    <i class="el-icon-view"></i>
+                    检测到 {{ detectionCount }} 个目标
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="video-footer" v-if="videoEnabled">
+              <div class="video-info">
+                <span class="info-item">
+                  <i class="el-icon-monitor"></i>
+                  {{ config.capture.window_width }}×{{ config.capture.window_height }}
+                </span>
+                <span class="info-item">
+                  <i class="el-icon-refresh"></i>
+                  {{ config.capture.fps }} FPS
+                </span>
+                <span class="info-item" v-if="videoFrame">
+                  <i class="el-icon-picture-outline"></i>
+                  JPEG 编码
+                </span>
+              </div>
+            </div>
+          </div>
+
+        </aside>
+
+        <!-- 右侧：配置Tab页 -->
+        <section class="right-panel">
+          <div class="panel-card config-section">
+            <el-tabs v-model="activeTab" type="card" class="config-tabs">
+              <!-- AI配置Tab -->
+              <el-tab-pane name="ai">
+                <span slot="label">
+                  <i class="el-icon-cpu"></i> AI 配置
+                </span>
+                <div class="tab-content">
+                  <div class="config-grid">
+                    <!-- 模型设置 -->
+                    <div class="config-block">
+                      <h4 class="block-title">
+                        <i class="el-icon-box"></i>
+                        模型设置
+                      </h4>
+                      <div class="form-group">
+                        <label class="form-label">AI 模型</label>
+                        <div class="form-control with-action">
+                          <el-select v-model="config.ai.model_name" size="small" @change="autoApply" style="flex: 1;">
+                            <el-option v-for="model in modelList" :key="model" :label="model" :value="model"></el-option>
+                          </el-select>
+                          <el-button icon="el-icon-refresh" circle size="small" @click="scanModels"></el-button>
+                        </div>
+                      </div>
+                      <div class="form-group">
+                        <div class="label-row">
+                          <label class="form-label">置信度阈值</label>
+                          <span class="value-tag">{{ config.ai.conf.toFixed(1) }}</span>
+                        </div>
+                        <el-slider v-model="config.ai.conf" :min="0.1" :max="1.0" :step="0.1" @change="autoApply"></el-slider>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">GPU 设备 ID</label>
+                        <el-input-number v-model="config.ai.device" :min="0" :max="10" size="small" @change="autoApply" style="width: 100%;"></el-input-number>
+                      </div>
+                    </div>
+
+                    <!-- 捕获设置 -->
+                    <div class="config-block">
+                      <h4 class="block-title">
+                        <i class="el-icon-full-screen"></i>
+                        捕获设置
+                      </h4>
+                      <div class="form-group">
+                        <label class="form-label">捕获窗口尺寸</label>
+                        <div class="input-pair">
+                          <el-input-number v-model="config.capture.window_width" :min="160" :max="1920" :step="10" size="small" @change="autoApply"></el-input-number>
+                          <span class="separator">×</span>
+                          <el-input-number v-model="config.capture.window_height" :min="160" :max="1080" :step="10" size="small" @change="autoApply"></el-input-number>
+                        </div>
+                      </div>
+                      <div class="form-group">
+                        <div class="label-row">
+                          <label class="form-label">目标帧率</label>
+                          <span class="value-tag">{{ config.capture.fps }} FPS</span>
+                        </div>
+                        <el-slider v-model="config.capture.fps" :min="30" :max="240" :step="5" @change="autoApply"></el-slider>
+                      </div>
+                      <div class="form-group checkbox">
+                        <el-checkbox v-model="config.capture.circle" @change="autoApply">使用圆形捕获区域</el-checkbox>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </el-tab-pane>
+
+              <!-- 瞄准配置Tab -->
+              <el-tab-pane name="aim">
+                <span slot="label">
+                  <i class="el-icon-aim"></i> 瞄准配置
+                </span>
+                <div class="tab-content">
+                  <div class="config-grid">
+                    <!-- 基础设置 -->
+                    <div class="config-block">
+                      <h4 class="block-title">
+                        <i class="el-icon-setting"></i>
+                        基础设置
+                      </h4>
+                      <div class="form-group checkbox">
+                        <el-checkbox v-model="config.aim.auto" @change="autoApply">启用自动瞄准</el-checkbox>
+                      </div>
+                      <div class="form-row">
+                        <div class="form-group half">
+                          <label class="form-label">瞄准模式</label>
+                          <el-select v-model="config.aim.mode" size="small" @change="autoApply" style="width: 100%;">
+                            <el-option label="按住 (Hold)" value="hold"></el-option>
+                            <el-option label="切换 (Toggle)" value="toggle"></el-option>
+                          </el-select>
+                        </div>
+                        <div class="form-group half">
+                          <label class="form-label">目标类别</label>
+                          <el-select v-model="config.aim.target_cls" size="small" @change="autoApply" style="width: 100%;">
+                            <el-option v-for="n in 6" :key="n-1" :label="'类别 ' + (n-1)" :value="n-1"></el-option>
+                          </el-select>
+                        </div>
+                      </div>
+                      <div class="form-group">
+                        <div class="label-row">
+                          <label class="form-label">最大瞄准距离</label>
+                          <span class="value-tag">{{ config.aim.max_target_distance }} px</span>
+                        </div>
+                        <el-slider v-model="config.aim.max_target_distance" :min="10" :max="160" :step="5" @change="autoApply"></el-slider>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">激活热键</label>
+                        <el-select v-model="selectedHotkeys" multiple size="small" placeholder="请选择热键" @change="onHotkeysChanged" style="width: 100%;">
+                          <el-option label="X1 鼠标按钮" value="X1MouseButton"></el-option>
+                          <el-option label="X2 鼠标按钮" value="X2MouseButton"></el-option>
+                          <el-option label="鼠标右键" value="RightMouseButton"></el-option>
+                          <el-option label="鼠标左键" value="LeftMouseButton"></el-option>
+                        </el-select>
+                      </div>
+                    </div>
+
+                    <!-- 身体偏移 -->
+                    <div class="config-block">
+                      <h4 class="block-title">
+                        <i class="el-icon-rank"></i>
+                        身体偏移设置
+                      </h4>
+                      <div class="offset-container">
+                        <div class="offset-visualizer" ref="offsetVisualizer">
+                          <canvas ref="offsetCanvas" width="140" height="140" @mousedown="onCanvasMouseDown" @mousemove="onCanvasMouseMove" @mouseup="onCanvasMouseUp" @mouseleave="onCanvasMouseUp"></canvas>
+                        </div>
+                        <div class="offset-controls">
+                          <div class="offset-input-group">
+                            <label>X 偏移</label>
+                            <el-input-number v-model="config.aim.body_x_offset" :min="-1" :max="1" :step="0.1" size="small" @change="onOffsetChanged" controls-position="right"></el-input-number>
+                          </div>
+                          <div class="offset-input-group">
+                            <label>Y 偏移</label>
+                            <el-input-number v-model="config.aim.body_y_offset" :min="-1" :max="1" :step="0.1" size="small" @change="onOffsetChanged" controls-position="right"></el-input-number>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </el-tab-pane>
+
+              <!-- 鼠标配置Tab -->
+              <el-tab-pane name="mouse">
+                <span slot="label">
+                  <i class="el-icon-mouse"></i> 鼠标配置
+                </span>
+                <div class="tab-content">
+                  <div class="config-grid">
+                    <div class="config-block">
+                      <h4 class="block-title">
+                        <i class="el-icon-mouse"></i>
+                        鼠标参数
+                      </h4>
+                      <div class="form-row">
+                        <div class="form-group half">
+                          <label class="form-label">移动方式</label>
+                          <el-select v-model="config.mouse.move" size="small" @change="autoApply" style="width: 100%;">
+                            <el-option label="makcu" value="makcu"></el-option>
+                          </el-select>
+                        </div>
+                        <div class="form-group half">
+                          <label class="form-label">DPI</label>
+                          <el-input-number v-model="config.mouse.dpi" :min="100" :max="20000" :step="100" size="small" @change="autoApply" style="width: 100%;"></el-input-number>
+                        </div>
+                      </div>
+                      <div class="form-group">
+                        <div class="label-row">
+                          <label class="form-label">鼠标灵敏度</label>
+                          <span class="value-tag">{{ config.mouse.sensitivity.toFixed(1) }}</span>
+                        </div>
+                        <el-slider v-model="config.mouse.sensitivity" :min="0.1" :max="10" :step="0.1" @change="autoApply"></el-slider>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">视野范围 (FOV)</label>
+                        <div class="input-pair">
+                          <el-input-number v-model="config.mouse.fov_width" :min="10" :max="180" :step="5" size="small" @change="autoApply"></el-input-number>
+                          <span class="separator">×</span>
+                          <el-input-number v-model="config.mouse.fov_height" :min="10" :max="180" :step="5" size="small" @change="autoApply"></el-input-number>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </el-tab-pane>
+            </el-tabs>
+
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- 底部日志 -->
+    <footer class="log-section">
+      <div class="panel-card log-panel">
+        <div class="log-header">
+          <div class="log-title">
+            <i class="el-icon-document"></i>
+            <span>系统日志</span>
+            <span class="log-count" v-if="logs.length > 0">({{ logs.length }})</span>
+          </div>
+          <div class="log-actions">
+            <el-button type="text" size="mini" icon="el-icon-delete" @click="logs = []">清空日志</el-button>
+          </div>
+        </div>
+        <div class="log-content" ref="logContent">
+          <div v-if="logs.length === 0" class="log-empty">
+            <i class="el-icon-document-delete"></i>
+            <span>暂无日志</span>
+          </div>
+          <div v-for="(log, index) in logs.slice(-100)" :key="index" class="log-line" :class="getLogClass(log)">
+            <span class="log-time">{{ getLogTime(log) }}</span>
+            <span class="log-text">{{ getLogText(log) }}</span>
+          </div>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script src="https://unpkg.com/vue@2.6.14/dist/vue.js"></script>
+  <script src="https://unpkg.com/element-ui/lib/index.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

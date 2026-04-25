@@ -19,6 +19,27 @@ class ColoredFormatter(logging.Formatter):
         return formatter.format(record)
 
 
+class WebSocketLogHandler(logging.Handler):
+    """WebSocket日志处理器 - 将日志发送到前端"""
+    
+    def __init__(self, level=logging.INFO):
+        super().__init__(level)
+        self.setFormatter(logging.Formatter('[%(asctime)s] %(message)s', datefmt='%H:%M:%S'))
+        self._ui_bridge = None
+    
+    def emit(self, record):
+        try:
+            # 延迟导入避免循环导入
+            if self._ui_bridge is None:
+                from core.ui_bridge import ui_bridge
+                self._ui_bridge = ui_bridge
+            
+            msg = self.format(record)
+            self._ui_bridge.emit_log(msg)
+        except Exception:
+            self.handleError(record)
+
+
 # 配置日志
 def setup_logger():
     """设置日志配置"""
@@ -26,6 +47,9 @@ def setup_logger():
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(ColoredFormatter())
+
+    # 创建WebSocket处理器
+    ws_handler = WebSocketLogHandler(level=logging.INFO)
 
     # 配置根日志器
     root_logger = logging.getLogger()
@@ -37,6 +61,7 @@ def setup_logger():
 
     # 添加新处理器
     root_logger.addHandler(console_handler)
+    root_logger.addHandler(ws_handler)
 
 
 # 自动配置日志

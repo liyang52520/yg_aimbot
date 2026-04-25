@@ -6,7 +6,6 @@ onnxruntime==1.23.2
 onnxruntime-gpu==1.23.2
 opencv-python==4.6.0.66
 packaging==25.0
-pyqt6==6.10.2
 pyserial==3.5
 pywin32==311
 requests==2.32.5
@@ -14,3 +13,4 @@ screeninfo==0.8.1
 supervision==0.27.0.post1
 ultralytics==8.4.15
 numpy==1.26.4
+websockets==12.0

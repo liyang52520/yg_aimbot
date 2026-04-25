@@ -10,7 +10,7 @@ import numpy as np
 from screeninfo import get_monitors
 
 from core.services.config_service import config_service
-from ui.signals import image_signal
+from core.ui_bridge import ui_bridge as image_signal
 
 logger = logging.getLogger(__name__)
 
@@ -185,9 +185,9 @@ class ScreenCaptureService:
             diff = self._capture_times[-1] - self._capture_times[0]
             if diff > 0:
                 fps = (len(self._capture_times) - 1) / diff
-                image_signal.capture_fps.emit(fps)
+                image_signal.emit_fps(capture_fps=fps)
         else:
-            image_signal.capture_fps.emit(0.0)
+            image_signal.emit_fps(capture_fps=0.0)
 
         self._last_fps_update = current_time
 
@@ -213,6 +213,11 @@ class ScreenCaptureService:
             with self._lock:
                 self._frame = frame
                 self._frame_id = frame_id
+            
+            # 如果启用了AI调试/视频监控，发送帧到UI
+            if config.get('ai_debug', False):
+                image_signal.emit_video_frame(frame)
+                
         except Exception as e:
             logger.error(f"处理帧失败: {e}")
 
