@@ -1,8 +1,9 @@
 import logging
 import math
 import time
+from collections import deque
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 import supervision as sv
@@ -23,6 +24,82 @@ class Target:
     cls: int
 
 
+class TargetPredictor:
+    """轻量级目标预测器 - 基于历史位置的线性速度外推"""
+
+    def __init__(self, history_size: int = 5):
+        self._history = deque(maxlen=history_size)
+        self._velocity = (0.0, 0.0)
+        self._last_update_time = 0.0
+
+    def update(self, target: Target):
+        """用真实检测结果更新预测器"""
+        now = time.time()
+        self._history.append((target.x, target.y, target.w, target.h, now))
+        self._velocity = self._calculate_velocity()
+        self._last_update_time = now
+
+    def predict(self, timestamp: float) -> Optional[Target]:
+        """预测指定时间的 target 位置"""
+        if not self._history:
+            return None
+
+        last_x, last_y, last_w, last_h, last_t = self._history[-1]
+        dt = timestamp - last_t
+
+        if dt < 0:
+            dt = 0
+
+        pred_x = last_x + self._velocity[0] * dt
+        pred_y = last_y + self._velocity[1] * dt
+
+        return Target(x=pred_x, y=pred_y, w=last_w, h=last_h, cls=-1)
+
+    def _calculate_velocity(self) -> Tuple[float, float]:
+        """计算目标速度（像素/秒）"""
+        if len(self._history) < 2:
+            return 0.0, 0.0
+
+        total_vx, total_vy, total_weight = 0.0, 0.0, 0.0
+
+        for i in range(1, len(self._history)):
+            x1, y1, _, _, t1 = self._history[i - 1]
+            x2, y2, _, _, t2 = self._history[i]
+            dt = t2 - t1
+
+            if dt <= 0.001:
+                continue
+
+            vx = (x2 - x1) / dt
+            vy = (y2 - y1) / dt
+            weight = i
+
+            total_vx += vx * weight
+            total_vy += vy * weight
+            total_weight += weight
+
+        if total_weight <= 0:
+            return 0.0, 0.0
+
+        return total_vx / total_weight, total_vy / total_weight
+
+    def reset(self):
+        """重置预测器状态"""
+        self._history.clear()
+        self._velocity = (0.0, 0.0)
+        self._last_update_time = 0.0
+
+    @property
+    def has_history(self) -> bool:
+        """是否有历史数据可用于预测"""
+        return len(self._history) > 0
+
+    @property
+    def last_update_time(self) -> float:
+        """最后更新时间"""
+        return self._last_update_time
+
+
 class TargetTrackerService:
     """目标跟踪服务"""
 
@@ -39,6 +116,10 @@ class TargetTrackerService:
         self._center_tensor = None
         self._update_center_tensor()
         self._last_processed_frame_id = -1
+
+        # 目标预测器
+        self._predictor = TargetPredictor(history_size=5)
+        self._is_predicted = False
 
     def _get_arch(self) -> str:
         """获取计算架构"""
@@ -82,28 +163,28 @@ class TargetTrackerService:
     def _process_detections(self, detections: sv.Detections):
         """处理检测结果"""
         if detections.xyxy.size == 0:
-            self.reset()
+            self._handle_no_detection()
             return
 
         target = self._select_best_target(detections)
         if target:
-            self._handle_target(target)
+            self._handle_target(target, is_predicted=False)
         else:
-            self.reset()
+            self._handle_no_detection()
 
     def _process_yolo_results(self, results):
         """处理YOLO结果"""
         for result in results:
             if not result.boxes:
-                self.reset()
+                self._handle_no_detection()
                 return
 
             detections = sv.Detections.from_ultralytics(result)
             target = self._select_best_target(detections)
             if target:
-                self._handle_target(target)
+                self._handle_target(target, is_predicted=False)
             else:
-                self.reset()
+                self._handle_no_detection()
 
     def _select_best_target(self, detections: sv.Detections) -> Optional[Target]:
         """选择最佳目标"""
@@ -175,13 +256,14 @@ class TargetTrackerService:
 
         return Target(*target_data, target_class)
 
-    def _handle_target(self, target: Target):
+    def _handle_target(self, target: Target, is_predicted: bool = False):
         """处理目标"""
         aim_cfg = config_service.get_section('aim')
         target_cls = aim_cfg.get('target_cls', 1.0)
         max_distance = aim_cfg.get('max_target_distance', 90)
 
-        if target.cls != target_cls:
+        # 预测目标不检查类别（因为预测时 cls 被设为 -1）
+        if not is_predicted and target.cls != target_cls:
             self.reset()
             return
 
@@ -191,10 +273,18 @@ class TargetTrackerService:
 
         if distance <= max_distance:
             from core.services.aim_service import aim_service
-            aim_service.process_target(target.x, target.y, target.w, target.h)
+            aim_service.process_target(target.x, target.y, target.w, target.h, is_predicted=is_predicted)
 
             self._tracked_target = target
-            self._tracking_confidence = min(1.0, self._tracking_confidence + 0.2)
+            self._is_predicted = is_predicted
+
+            if is_predicted:
+                # 预测模式下置信度缓慢下降
+                self._tracking_confidence = max(0.0, self._tracking_confidence - 0.1)
+            else:
+                self._tracking_confidence = min(1.0, self._tracking_confidence + 0.2)
+                # 用真实检测更新预测器
+                self._predictor.update(target)
         else:
             self.reset()
 
@@ -202,10 +292,48 @@ class TargetTrackerService:
         """获取最佳目标"""
         return self._tracked_target
 
+    def _handle_no_detection(self):
+        """处理无检测结果的情况 - 尝试用预测器保持跟踪"""
+        aim_cfg = config_service.get_section('aim')
+        max_miss_time = aim_cfg.get('max_miss_time', 0.15)
+        max_miss_distance = aim_cfg.get('max_miss_distance', 120)
+
+        if not self._predictor.has_history:
+            self.reset()
+            return
+
+        # 检查丢失时间是否超过阈值
+        now = time.time()
+        elapsed = now - self._predictor.last_update_time
+
+        if elapsed > max_miss_time:
+            self.reset()
+            return
+
+        # 尝试预测当前位置
+        predicted_target = self._predictor.predict(now)
+        if predicted_target is None:
+            self.reset()
+            return
+
+        # 检查预测位置是否超出允许范围
+        dx = predicted_target.x - self._center_tensor[0].item()
+        dy = predicted_target.y - self._center_tensor[1].item()
+        distance = math.sqrt(dx ** 2 + dy ** 2)
+
+        if distance > max_miss_distance:
+            self.reset()
+            return
+
+        # 使用预测目标继续跟踪
+        self._handle_target(predicted_target, is_predicted=True)
+
     def reset(self):
         """重置跟踪状态"""
         self._tracked_target = None
         self._tracking_confidence = 0.0
+        self._is_predicted = False
+        self._predictor.reset()
 
 
 tracker_service = TargetTrackerService()

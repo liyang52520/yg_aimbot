@@ -171,15 +171,16 @@ class AimService:
         self._update_cache()
         logger.info(f"模型输入大小已更新: {input_size}x{input_size}")
 
-    def process_target(self, x: float, y: float, w: float, h: float):
+    def process_target(self, x: float, y: float, w: float, h: float, is_predicted: bool = False):
         """处理目标"""
-        move_x, move_y = self._calculate_movement(x, y, w, h)
+        move_x, move_y = self._calculate_movement(x, y, w, h, is_predicted=is_predicted)
 
         if self._should_move(move_x, move_y):
             self._execute_movement(move_x, move_y)
 
     def _calculate_movement(self, target_x: float, target_y: float,
-                            target_w: float, target_h: float) -> Tuple[float, float]:
+                            target_w: float, target_h: float,
+                            is_predicted: bool = False) -> Tuple[float, float]:
         """计算移动"""
         aim_cfg = config_service.get_section('aim')
 
@@ -198,8 +199,14 @@ class AimService:
         predicted_x = offset_x + velocity_x * self._config.prediction_time
         predicted_y = offset_y + velocity_y * self._config.prediction_time
 
-        smoothed_x = self._config.smooth_factor * predicted_x + self._inv_smooth_factor * self._state.offset_x
-        smoothed_y = self._config.smooth_factor * predicted_y + self._inv_smooth_factor * self._state.offset_y
+        # 预测模式下降低平滑因子，更快响应真实检测的修正
+        smooth_factor = self._config.smooth_factor
+        if is_predicted:
+            smooth_factor = max(0.3, smooth_factor * 0.7)
+
+        inv_smooth_factor = 1.0 - smooth_factor
+        smoothed_x = smooth_factor * predicted_x + inv_smooth_factor * self._state.offset_x
+        smoothed_y = smooth_factor * predicted_y + inv_smooth_factor * self._state.offset_y
 
         self._state.offset_x = smoothed_x
         self._state.offset_y = smoothed_y
@@ -207,7 +214,8 @@ class AimService:
         move_x = (smoothed_x * self._degrees_per_pixel_x / 360.0) * self._dpi_factor
         move_y = (smoothed_y * self._degrees_per_pixel_y / 360.0) * self._dpi_factor
 
-        if distance < target_w * self._config.tremor_distance_threshold:
+        # 预测模式下不添加抖动，避免不确定性叠加
+        if not is_predicted and distance < target_w * self._config.tremor_distance_threshold:
             move_x, move_y = self._add_tremor(move_x, move_y, distance, target_w)
 
         return self._clamp(move_x), self._clamp(move_y)

@@ -40,7 +40,10 @@ class ConfigService:
             'body_x_offset': 0.1,
             'body_y_offset': 0.1,
             'hotkeys': 'X1MouseButton,X2MouseButton',
-            'max_target_distance': 90
+            'max_target_distance': 90,
+            'max_miss_time': 0.15,
+            'max_miss_distance': 120,
+            'prediction_history_size': 5
         },
         'mouse': {
             'move': 'makcu',
