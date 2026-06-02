@@ -238,3 +238,6 @@ http-client.private.env.json
 .idea/**/copilot.data.migration.*.xml
 
 node_modules/
+
+# claude
+.claude/settings.local.json
