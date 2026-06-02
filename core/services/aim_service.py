@@ -1,6 +1,5 @@
 import logging
 import math
-import queue
 import threading
 import time
 from collections import deque
@@ -13,7 +12,8 @@ from core.services.config_service import config_service
 
 logger = logging.getLogger(__name__)
 
-MOVE_QUEUE_MAXSIZE = 10
+MOVE_SLEEP_SEC = 0.001    # 1ms → 运动线程约 500-1000 Hz
+MOVE_FRACTION = 0.15       # 每次 tick 逼近剩余距离的比例
 TARGET_HISTORY_MAXLEN = 3
 
 
@@ -122,7 +122,12 @@ class AimService:
         self._config = self._load_config()
         self._state = TargetState()
         self._model_input_size = 640
-        self._move_queue: queue.Queue[Tuple[float, float]] = queue.Queue(maxsize=MOVE_QUEUE_MAXSIZE)
+        # 连续运动控制状态
+        self._target_remain_x = 0.0
+        self._target_remain_y = 0.0
+        self._move_lock = threading.Lock()
+        self._frac_x = 0.0   # 亚像素累积器 X
+        self._frac_y = 0.0   # 亚像素累积器 Y
         self._move_thread_running = True
         self._move_thread = threading.Thread(target=self._move_worker, daemon=True)
         self._move_thread.start()
@@ -172,11 +177,11 @@ class AimService:
         logger.info(f"模型输入大小已更新: {input_size}x{input_size}")
 
     def process_target(self, x: float, y: float, w: float, h: float, is_predicted: bool = False):
-        """处理目标"""
+        """处理目标 - 计算移动量并设置为连续运动目标"""
         move_x, move_y = self._calculate_movement(x, y, w, h, is_predicted=is_predicted)
-
-        if self._should_move(move_x, move_y):
-            self._execute_movement(move_x, move_y)
+        with self._move_lock:
+            self._target_remain_x = move_x
+            self._target_remain_y = move_y
 
     def _calculate_movement(self, target_x: float, target_y: float,
                             target_w: float, target_h: float,
@@ -249,30 +254,51 @@ class AimService:
         """限制范围"""
         return max(-self._config.max_move, min(self._config.max_move, value))
 
-    def _should_move(self, move_x: float, move_y: float) -> bool:
-        """判断是否需要移动"""
-        min_move_sq = self._config.min_move ** 2
-        return move_x ** 2 > min_move_sq or move_y ** 2 > min_move_sq
-
-    def _execute_movement(self, x: float, y: float):
-        """执行移动"""
-        try:
-            self._move_queue.put_nowait((x, y))
-        except queue.Full:
-            pass
-
     def _move_worker(self):
-        """移动工作线程"""
+        """连续高频率运动工作线程（~500-1000Hz）"""
         while self._move_thread_running:
             try:
-                move_x, move_y = self._move_queue.get(timeout=0.1)
-                ix, iy = int(move_x), int(move_y)
-                MouseControlService.move(ix, iy)
-                self._move_queue.task_done()
-            except queue.Empty:
-                continue
+                with self._move_lock:
+                    rx = self._target_remain_x
+                    ry = self._target_remain_y
+
+                # 无有效移动 → 长休眠减少 CPU 占用
+                if abs(rx) < self._config.min_move and abs(ry) < self._config.min_move:
+                    time.sleep(0.002)
+                    continue
+
+                # 指数逼近：每次 tick 移动剩余距离的固定比例
+                step_x = rx * MOVE_FRACTION
+                step_y = ry * MOVE_FRACTION
+
+                step_x = self._clamp(step_x)
+                step_y = self._clamp(step_y)
+
+                # 亚像素累积：避免 int() 截断导致的精度丢失
+                self._frac_x += step_x
+                self._frac_y += step_y
+                ix = int(self._frac_x)
+                iy = int(self._frac_y)
+                self._frac_x -= ix
+                self._frac_y -= iy
+
+                if ix != 0 or iy != 0:
+                    MouseControlService.move(ix, iy)
+
+                # 更新剩余目标（锁保护，防止与 process_target 竞争）
+                with self._move_lock:
+                    self._target_remain_x -= step_x
+                    self._target_remain_y -= step_y
+                    # 防过冲：符号变化意味着走过头了
+                    if self._target_remain_x * rx < 0:
+                        self._target_remain_x = 0.0
+                    if self._target_remain_y * ry < 0:
+                        self._target_remain_y = 0.0
+
+                time.sleep(MOVE_SLEEP_SEC)
             except Exception as e:
-                logger.error(f"移动线程错误: {e}")
+                logger.error(f"连续运动线程错误: {e}")
+                time.sleep(0.005)
 
     def stop(self):
         """停止服务"""
