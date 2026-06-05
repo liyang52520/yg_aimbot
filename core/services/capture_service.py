@@ -16,79 +16,68 @@ logger = logging.getLogger(__name__)
 
 
 class ScreenCaptureService:
-    """屏幕捕获服务"""
+    """屏幕捕获服务 — mss (GDI) 后端"""
 
     def __init__(self):
         self._running = False
         self._thread: Optional[threading.Thread] = None
+
+        # 锁保护帧数据（竞争极低：主线程 ~0.05ms 一次，截取线程 ~6ms 一次）
+        self._lock = threading.Lock()
         self._frame: Optional[np.ndarray] = None
         self._frame_id: Optional[int] = None
-        self._lock = threading.Lock()
+
         self._monitor: dict = {}
-        self._circle_mask: Optional[np.ndarray] = None
+        self._circle_mask_3ch: Optional[np.ndarray] = None
         self._last_config = None
         self._ready = False
-        self._fps = config_service.get('capture', 'fps', 60)
+        self._fps = config_service.get('capture', 'fps', 160)
         self._interval = 1.0 / self._fps
-        
-        # 帧率统计
-        self._capture_times = deque(maxlen=30)
-        self._fps_update_interval = 0.03
+
+        # 帧率统计（环形缓冲区，每秒更新一次显示）
+        self._capture_times = deque(maxlen=60)
+        self._fps_update_interval = 0.1
         self._last_fps_update = 0
-        
-        # 帧ID生成
+
+        # 帧ID生成（雪花算法）
         self._last_second = -1
         self._frame_id_counter = 0
-        
+
         self._init_monitor()
         self._last_config = config_service.get_section('capture').copy()
         self._ready = True
         config_service.register_callback(self._on_config_change)
 
     def _on_config_change(self, section: str, updates: Dict[str, Any]):
-        """配置变更回调"""
-        if not self._ready:
+        if not self._ready or section != 'capture':
             return
+        cfg = config_service.get_section('capture')
+        w = cfg.get('window_width', 320)
+        h = cfg.get('window_height', 320)
+        fps = cfg.get('fps', 160)
 
-        if section == 'capture':
-            current_config = config_service.get_section('capture')
+        if w != self._monitor.get('width') or h != self._monitor.get('height'):
+            self._init_monitor()
+            self._circle_mask_3ch = None
+            logger.info(f"监控区域已更新: {w}x{h}")
 
-            new_width = current_config.get('window_width', 320)
-            new_height = current_config.get('window_height', 320)
-            new_fps = current_config.get('fps', 60)
+        if fps != self._fps:
+            self._fps = fps
+            self._interval = 1.0 / self._fps
+            logger.info(f"FPS已更新: {fps}")
 
-            current_monitor_width = self._monitor.get('width', 0)
-            current_monitor_height = self._monitor.get('height', 0)
-
-            logger.debug(
-                f"配置变更: 新的宽高={new_width}x{new_height}, 当前监控={current_monitor_width}x{current_monitor_height}, 新的FPS={new_fps}")
-
-            if new_width != current_monitor_width or new_height != current_monitor_height:
-                self._init_monitor()
-                self._circle_mask = None
-                logger.info(f"监控区域已更新: {new_width}x{new_height}")
-
-            if new_fps != self._fps:
-                self._fps = new_fps
-                self._interval = 1.0 / self._fps
-                logger.info(f"FPS已更新: {new_fps}")
-            else:
-                logger.debug("窗口尺寸和FPS未变化，跳过更新")
-
-            self._last_config = current_config.copy()
+        self._last_config = cfg.copy()
 
     def _init_monitor(self):
-        """初始化监控区域"""
         try:
-            config = config_service.get_section('capture')
-            width = config.get('window_width', 320)
-            height = config.get('window_height', 320)
-
+            cfg = config_service.get_section('capture')
+            width = cfg.get('window_width', 640)
+            height = cfg.get('window_height', 640)
             for monitor in get_monitors():
                 if monitor.is_primary:
-                    screen_w, screen_h = monitor.width, monitor.height
-                    left = (screen_w - width) // 2
-                    top = (screen_h - height) // 2
+                    sw, sh = monitor.width, monitor.height
+                    left = (sw - width) // 2
+                    top = (sh - height) // 2
                     self._monitor = {'left': left, 'top': top, 'width': width, 'height': height}
                     logger.info(f"监控区域初始化: {width}x{height} @ ({left}, {top})")
                     break
@@ -96,163 +85,120 @@ class ScreenCaptureService:
             logger.error(f"初始化监控区域失败: {e}")
 
     def start(self):
-        """启动捕获"""
         if self._running:
             return
-
         self._running = True
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
         logger.info("屏幕捕获服务已启动")
 
     def stop(self):
-        """停止捕获"""
         self._running = False
         if self._thread:
             self._thread.join(timeout=1.0)
         logger.info("屏幕捕获服务已停止")
 
     def _generate_frame_id(self) -> int:
-        """生成帧ID，基于时间的雪花算法"""
-        current_time = time.time()
-        current_second = int(current_time)
-        
-        # 如果是新的秒，重置计数器
-        if current_second != self._last_second:
-            self._last_second = current_second
+        t = int(time.time())
+        if t != self._last_second:
+            self._last_second = t
             self._frame_id_counter = 0
         else:
             self._frame_id_counter += 1
-        
-        # 生成帧ID：秒数左移20位 + 计数器
-        frame_id = (current_second << 20) | self._frame_id_counter
-        return frame_id
+        return (t << 20) | self._frame_id_counter
 
     def get_frame(self) -> Optional[tuple[np.ndarray, int]]:
-        """获取一帧图像和帧ID"""
+        """获取一帧（锁保护复制，安全无竞态）"""
         with self._lock:
-            if self._frame is not None and self._frame_id is not None:
+            if self._frame is not None:
                 return self._frame.copy(), self._frame_id
             return None, None
 
     def get_resolution(self) -> Tuple[int, int]:
-        """获取捕获分辨率"""
-        return self._monitor.get('width', 320), self._monitor.get('height', 320)
+        return self._monitor.get('width', 640), self._monitor.get('height', 640)
 
     def _capture_loop(self):
-        """捕获循环"""
         sct = None
         try:
             sct = mss.mss()
-            last_time = time.time()
+            last_time = time.perf_counter()
 
             while self._running:
-                current_time = time.time()
-                elapsed = current_time - last_time
-
-                if elapsed >= self._interval:
+                now = time.perf_counter()
+                if now - last_time >= self._interval:
                     try:
-                        frame = self._capture_frame(sct)
-                        if frame is not None:
-                            self._process_frame(frame)
-                            # 记录捕获时间
-                            self._capture_times.append(current_time)
-                            # 更新FPS
-                            self._update_fps(current_time)
-                        # 使用累加_interval的方式更新last_time，确保帧率稳定
+                        raw = sct.grab(self._monitor)
+                        # BGRA → BGR view（零拷贝）
+                        img = np.frombuffer(raw.bgra, np.uint8).reshape(
+                            (raw.height, raw.width, 4))[:, :, :3]
+                        self._process_frame(img)
+                        self._capture_times.append(now)
+                        self._update_fps(now)
                         last_time += self._interval
                     except Exception as e:
                         logger.error(f"捕获帧错误: {e}")
                 else:
-                    sleep_time = max(0, self._interval - elapsed - 0.001)
-                    if sleep_time > 0.001:
-                        time.sleep(sleep_time)
+                    # 自适应休眠：剩余时间 > 1ms 时睡长些，否则短轮
+                    remaining = self._interval - (now - last_time)
+                    if remaining > 0.002:
+                        time.sleep(remaining - 0.001)
+                    else:
+                        time.sleep(0.0005)
         except Exception as e:
             logger.error(f"捕获循环异常: {e}")
         finally:
             if sct:
                 try:
                     sct.close()
-                except:
+                except Exception:
                     pass
-    
+
     def _update_fps(self, current_time: float):
-        """更新捕获帧率"""
         if current_time - self._last_fps_update < self._fps_update_interval:
             return
-
-        if len(self._capture_times) >= 2:
-            diff = self._capture_times[-1] - self._capture_times[0]
-            if diff > 0:
-                fps = (len(self._capture_times) - 1) / diff
-                image_signal.emit_fps(capture_fps=fps)
-        else:
-            image_signal.emit_fps(capture_fps=0.0)
-
+        n = len(self._capture_times)
+        if n >= 2:
+            d = self._capture_times[-1] - self._capture_times[0]
+            if d > 0:
+                image_signal.emit_fps(capture_fps=(n - 1) / d)
         self._last_fps_update = current_time
 
-    def _capture_frame(self, sct: mss.mss) -> Optional[np.ndarray]:
-        """捕获一帧"""
-        try:
-            screenshot = sct.grab(self._monitor)
-            img = np.frombuffer(screenshot.bgra, np.uint8)
-            return img.reshape((screenshot.height, screenshot.width, 4))[:, :, :3]
-        except Exception as e:
-            logger.error(f"捕获帧失败: {e}")
-            return None
-
     def _process_frame(self, frame: np.ndarray):
-        """处理帧"""
         try:
-            config = config_service.get_section('capture')
-
-            if config.get('circle', False):
+            cfg = config_service.get_section('capture')
+            if cfg.get('circle', False):
                 frame = self._apply_circle_mask(frame)
+            fid = self._generate_frame_id()
 
-            frame_id = self._generate_frame_id()
             with self._lock:
-                self._frame = frame
-                self._frame_id = frame_id
-            
-            # 如果启用了AI调试/视频监控，发送帧到UI
-            if config.get('ai_debug', False):
+                self._frame = frame.copy()
+                self._frame_id = fid
+
+            if cfg.get('ai_debug', False):
                 image_signal.emit_video_frame(frame)
-                
         except Exception as e:
             logger.error(f"处理帧失败: {e}")
 
     def _apply_circle_mask(self, frame: np.ndarray) -> np.ndarray:
-        """应用圆形掩码"""
-        height, width = frame.shape[:2]
-
-        if self._circle_mask is None or self._circle_mask.shape != (height, width):
-            center_x, center_y = width // 2, height // 2
-            radius = min(width, height) // 2
-
-            self._circle_mask = np.zeros((height, width), dtype=np.uint8)
-            cv2.circle(self._circle_mask, (center_x, center_y), radius, 255, -1)
-
-        mask_3ch = cv2.merge([self._circle_mask] * 3)
-        return cv2.bitwise_and(frame, mask_3ch)
+        """3通道预计算圆形遮罩（避免逐帧 cv2.merge 开销）"""
+        h, w = frame.shape[:2]
+        if self._circle_mask_3ch is None or self._circle_mask_3ch.shape[:2] != (h, w):
+            cx, cy = w // 2, h // 2
+            r = min(w, h) // 2
+            mask = np.zeros((h, w), dtype=np.uint8)
+            cv2.circle(mask, (cx, cy), r, 255, -1)
+            self._circle_mask_3ch = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        return cv2.bitwise_and(frame, self._circle_mask_3ch)
 
     def check_config_change(self) -> bool:
-        """检查配置是否变更"""
-        current_config = config_service.get_section('capture')
-
+        current = config_service.get_section('capture')
         if self._last_config is None:
-            self._last_config = current_config.copy()
+            self._last_config = current.copy()
             return False
-
-        has_change = False
-        for key in current_config:
-            if current_config[key] != self._last_config.get(key):
-                has_change = True
-                break
-
-        if has_change:
-            self._last_config = current_config.copy()
+        if current != self._last_config:
+            self._last_config = current.copy()
             self._init_monitor()
-            self._circle_mask = None
+            self._circle_mask_3ch = None
             return True
         return False
 

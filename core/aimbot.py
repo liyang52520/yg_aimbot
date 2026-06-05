@@ -106,16 +106,10 @@ class Aimbot:
                 ai_debug = config_service.get('capture', 'ai_debug', False)
 
                 if ai_debug or need_prediction:
-                    # 异步推理模式
                     await self._handle_async_inference(frame, frame_id, ai_debug, need_prediction)
-                else:
-                    # 不需要预测时，确保预测帧率为0
-                    if len(inference_service._prediction_times) > 0:
-                        inference_service._prediction_times.clear()
-                        image_signal.emit_fps(predict_fps=0.0)
 
-                # 减少不必要的休眠
-                await asyncio.sleep(0.00001)
+                # 主循环休眠：100μs ≈ 10kHz 轮询，平衡响应与CPU
+                await asyncio.sleep(0.0001)
 
             except Exception as e:
                 logger.error(f"主循环错误: {e}")
