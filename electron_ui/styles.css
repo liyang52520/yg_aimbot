@@ -554,6 +554,28 @@ html, body {
   gap: 8px;
 }
 
+/* 只读尺寸展示 */
+.size-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+}
+
+.size-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.size-hint {
+  font-size: 11px;
+  color: #909399;
+}
+
 .input-pair {
   display: flex;
   align-items: center;

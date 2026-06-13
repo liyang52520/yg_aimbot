@@ -66,6 +66,12 @@ class Aimbot:
         aim_service.set_model_input_size(model_input_size)
         logger.info(f"模型输入大小: {model_input_size}x{model_input_size}")
 
+        # 根据模型输入大小自动设置捕获窗口
+        config_service.update_section('capture', {
+            'window_width': model_input_size,
+            'window_height': model_input_size
+        }, notify=True)
+
         capture_service.start()
 
         self._running = True
@@ -159,7 +165,32 @@ class Aimbot:
             self._last_model_name = current
             logger.info(f"检测到模型切换: {current}")
             if inference_service.reload():
-                aim_service.set_model_input_size(inference_service.get_input_size())
+                new_size = inference_service.get_input_size()
+                aim_service.set_model_input_size(new_size)
+                config_service.update_section('capture', {
+                    'window_width': new_size,
+                    'window_height': new_size
+                }, notify=True)
+                logger.info(f"捕获窗口已自动调整为: {new_size}x{new_size}")
+                # 推送更新后的配置到前端
+                self._broadcast_config()
+
+    def _broadcast_config(self):
+        """推送当前配置到前端 WebSocket"""
+        try:
+            from core.websocket_server import websocket_server
+            config = {
+                'ai': config_service.get_section('ai'),
+                'capture': config_service.get_section('capture'),
+                'aim': config_service.get_section('aim'),
+                'mouse': config_service.get_section('mouse')
+            }
+            websocket_server.broadcast_sync({
+                'type': 'config',
+                'data': config
+            })
+        except Exception as e:
+            logger.error(f"推送配置到前端失败: {e}")
 
     def _check_need_prediction(self) -> bool:
         """检查是否需要预测"""

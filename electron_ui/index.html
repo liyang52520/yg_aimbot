@@ -157,10 +157,9 @@
                       </h4>
                       <div class="form-group">
                         <label class="form-label">捕获窗口尺寸</label>
-                        <div class="input-pair">
-                          <el-input-number v-model="config.capture.window_width" :min="160" :max="1920" :step="10" size="small" @change="autoApply"></el-input-number>
-                          <span class="separator">×</span>
-                          <el-input-number v-model="config.capture.window_height" :min="160" :max="1080" :step="10" size="small" @change="autoApply"></el-input-number>
+                        <div class="size-display">
+                          <span class="size-value">{{ config.capture.window_width }} × {{ config.capture.window_height }}</span>
+                          <span class="size-hint">px（由模型自动控制）</span>
                         </div>
                       </div>
                       <div class="form-group">
