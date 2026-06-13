@@ -167,6 +167,8 @@ class AsyncInferenceService:
         self._wake_event.set()  # 唤醒线程
         if self._inference_thread and self._inference_thread.is_alive():
             self._inference_thread.join(timeout=3.0)
+        # 通知前端推理 FPS 归零
+        image_signal.emit_fps(predict_fps=0)
         logger.info("异步推理服务已停止")
 
     def submit_frame(self, frame: np.ndarray, frame_id: int) -> bool:

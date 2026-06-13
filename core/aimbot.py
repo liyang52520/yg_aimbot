@@ -35,6 +35,8 @@ class Aimbot:
 
         self._last_model_name = config_service.get('ai', 'model_name', '')
 
+        self._was_inferring = False
+
     def _cache_hotkey_codes(self):
         """缓存热键代码"""
         from core.buttons import Buttons
@@ -112,9 +114,14 @@ class Aimbot:
                 # 检查是否需要预测
                 need_prediction = self._check_need_prediction()
                 ai_debug = config_service.get('capture', 'ai_debug', False)
+                is_inferring = ai_debug or need_prediction
 
-                if ai_debug or need_prediction:
+                if is_inferring:
                     await self._handle_async_inference(frame, frame_id, ai_debug, need_prediction)
+                elif self._was_inferring:
+                    image_signal.emit_fps(predict_fps=0)
+
+                self._was_inferring = is_inferring
 
                 # 主循环休眠：100μs ≈ 10kHz 轮询，平衡响应与CPU
                 await asyncio.sleep(0.0001)
