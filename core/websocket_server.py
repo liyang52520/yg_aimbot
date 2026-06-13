@@ -3,6 +3,7 @@ WebSocket 服务器 - 用于 Electron UI 和 Python 核心之间的实时通信
 """
 import asyncio
 import base64
+import concurrent.futures
 import json
 import logging
 import threading
@@ -342,11 +343,10 @@ class WebSocketServer:
         if current_time - self._last_frame_time < 0.033:  # 最多 30fps
             return
         self._last_frame_time = current_time
-        
+
         try:
-            # 压缩并编码为 base64
             import cv2
-            
+
             # 缩小尺寸以减少传输量
             height, width = frame.shape[:2]
             if width > 640:
@@ -354,12 +354,12 @@ class WebSocketServer:
                 new_width = 640
                 new_height = int(height * scale)
                 frame = cv2.resize(frame, (new_width, new_height))
-                
+
             # 压缩为 JPEG
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
             _, buffer = cv2.imencode('.jpg', frame, encode_param)
             img_base64 = base64.b64encode(buffer).decode('utf-8')
-            
+
             self.broadcast_sync({
                 'type': 'video-frame',
                 'data': f'data:image/jpeg;base64,{img_base64}'

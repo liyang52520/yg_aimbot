@@ -38,8 +38,10 @@ class Aimbot:
         self._was_inferring = False
         self._need_prediction = False
 
-        # 事件驱动：缓存无需每次都读配置的热路径值
+        # 缓存热路径配置值，避免 200Hz 路径重复读锁
         self._cached_ai_debug = config_service.get('capture', 'ai_debug', False)
+        self._cached_auto = config_service.get('aim', 'auto', False)
+        self._cached_mode = config_service.get('aim', 'mode', 'hold')
         config_service.register_callback(self._on_config_changed)
 
         # 事件驱动：帧提交去重
@@ -53,6 +55,11 @@ class Aimbot:
         """配置变更回调 — 更新缓存的热路径值"""
         if section == 'capture' and 'ai_debug' in updates:
             self._cached_ai_debug = updates['ai_debug']
+        if section == 'aim':
+            if 'auto' in updates:
+                self._cached_auto = updates['auto']
+            if 'mode' in updates:
+                self._cached_mode = updates['mode']
 
     def _cache_hotkey_codes(self):
         """缓存热键代码"""
@@ -152,10 +159,11 @@ class Aimbot:
                         if self._need_prediction:
                             tracker_service.update(result.detections, result.frame_id)
 
-                        if self._cached_ai_debug:
-                            image_signal.emit_detections(result.detections)
-                            if result.original_frame is not None:
-                                image_signal.emit_video_frame(result.original_frame)
+                    # ai_debug 模式：始终发送检测结果（可能为空）和视频帧
+                    if self._cached_ai_debug and result:
+                        image_signal.emit_detections(result.detections)
+                        if result.original_frame is not None:
+                            image_signal.emit_video_frame(result.original_frame)
                 else:
                     # 无需推理，短暂休眠避免 CPU 空转
                     await asyncio.sleep(0.005)
@@ -183,6 +191,10 @@ class Aimbot:
         if hotkeys != self._last_hotkeys:
             self._cache_hotkey_codes()
             self._last_hotkeys = hotkeys
+
+        # 刷新 hot path 配置缓存
+        self._cached_auto = config_service.get('aim', 'auto', False)
+        self._cached_mode = config_service.get('aim', 'mode', 'hold')
 
     def _check_model_change(self):
         """检测模型切换并热重载"""
@@ -220,10 +232,10 @@ class Aimbot:
 
     def _check_need_prediction(self) -> bool:
         """检查是否需要预测"""
-        if config_service.get('aim', 'auto', False):
+        if self._cached_auto:
             return True
 
-        mode = config_service.get('aim', 'mode', 'hold')
+        mode = self._cached_mode
 
         if mode == "toggle":
             for key_code in self._cached_hotkey_codes:

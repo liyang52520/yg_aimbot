@@ -144,12 +144,21 @@ class AimService:
         self._move_thread = threading.Thread(target=self._move_worker, daemon=True)
         self._move_thread.start()
         self._update_cache()
+        self._cache_aim_config()
 
         config_service.register_callback(self._on_config_change)
+
+    def _cache_aim_config(self):
+        """缓存 aim 配置值，避免热路径重复读锁"""
+        aim_cfg = config_service.get_section('aim')
+        self._cached_body_x_offset = aim_cfg.get('body_x_offset', 0.1)
+        self._cached_body_y_offset = aim_cfg.get('body_y_offset', 0.1)
 
     def _on_config_change(self, section: str, updates: Dict[str, Any]):
         if section in ('aim', 'mouse', 'capture'):
             self.update_config()
+        if section == 'aim':
+            self._cache_aim_config()
 
     def _load_config(self) -> MouseConfig:
         mouse_cfg = config_service.get_section('mouse')
@@ -197,11 +206,9 @@ class AimService:
                             target_w: float, target_h: float,
                             is_predicted: bool = False) -> Tuple[float, float]:
         """计算移动量"""
-        aim_cfg = config_service.get_section('aim')
-
-        # 身体偏移
-        adjusted_x = target_x + aim_cfg.get('body_x_offset', 0.1) * target_w * 0.5
-        adjusted_y = target_y + aim_cfg.get('body_y_offset', 0.1) * target_h * 0.5
+        # 身体偏移（使用缓存的配置值，避免热路径重复读锁）
+        adjusted_x = target_x + self._cached_body_x_offset * target_w * 0.5
+        adjusted_y = target_y + self._cached_body_y_offset * target_h * 0.5
 
         # 模型空间映射
         ratio = self._capture_to_model_ratio
