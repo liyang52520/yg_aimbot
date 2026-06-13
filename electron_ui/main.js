@@ -1,3 +1,6 @@
+// 禁用 Electron 安全警告（本地游戏工具，非生产环境）
+process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
+
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 

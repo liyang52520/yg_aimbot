@@ -55,8 +55,8 @@ def setup_logger():
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
 
-    # 清除现有处理器
-    for handler in root_logger.handlers:
+    # 清除现有处理器（使用切片副本避免迭代活列表时跳过元素）
+    for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
     # 添加新处理器

@@ -4,6 +4,10 @@ import sys
 import subprocess
 import os
 import time
+import warnings
+
+# 屏蔽第三方库的废弃 API 警告（如 torchmetrics 内部使用 @deprecated）
+warnings.filterwarnings("ignore", message=".*MeanAveragePrecision.*")
 
 from core.aimbot import app
 from core.logger import setup_logger
