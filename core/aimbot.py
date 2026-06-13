@@ -36,6 +36,23 @@ class Aimbot:
         self._last_model_name = config_service.get('ai', 'model_name', '')
 
         self._was_inferring = False
+        self._need_prediction = False
+
+        # 事件驱动：缓存无需每次都读配置的热路径值
+        self._cached_ai_debug = config_service.get('capture', 'ai_debug', False)
+        config_service.register_callback(self._on_config_changed)
+
+        # 事件驱动：帧提交去重
+        self._last_submitted_frame_id = -1
+
+        # 事件驱动：限速热键检查
+        self._last_hotkey_check = 0.0
+        self._hotkey_check_interval = 0.005  # 200Hz
+
+    def _on_config_changed(self, section: str, updates: dict):
+        """配置变更回调 — 更新缓存的热路径值"""
+        if section == 'capture' and 'ai_debug' in updates:
+            self._cached_ai_debug = updates['ai_debug']
 
     def _cache_hotkey_codes(self):
         """缓存热键代码"""
@@ -95,64 +112,65 @@ class Aimbot:
             self.stop()
 
     async def _main_loop(self):
-        """主循环"""
+        """事件驱动主循环 — 仅在需要推理时阻塞等待结果，空闲时休眠"""
+        loop = asyncio.get_event_loop()
+
         while self._running and not self._stop_event.is_set():
             try:
-                current_time = time.time()
+                now = time.time()
 
-                # 减少配置检查频率
-                if current_time - self._last_config_check >= self._config_check_interval:
-                    self._check_config()
-                    self._last_config_check = current_time
+                # 限速热键检查 (200Hz)
+                if now - self._last_hotkey_check >= self._hotkey_check_interval:
+                    self._need_prediction = self._check_need_prediction()
+                    self._last_hotkey_check = now
 
-                # 获取帧
-                frame, frame_id = capture_service.get_frame()
-                if frame is None:
-                    await asyncio.sleep(0.0001)
-                    continue
-
-                # 检查是否需要预测
-                need_prediction = self._check_need_prediction()
-                ai_debug = config_service.get('capture', 'ai_debug', False)
-                is_inferring = ai_debug or need_prediction
+                is_inferring = self._need_prediction or self._cached_ai_debug
 
                 if is_inferring:
-                    await self._handle_async_inference(frame, frame_id, ai_debug, need_prediction)
-                elif self._was_inferring:
-                    image_signal.emit_fps(predict_fps=0)
+                    # 1. 提交最新帧到推理（非阻塞）
+                    frame, frame_id = capture_service.get_frame()
+                    if frame is not None and frame_id != self._last_submitted_frame_id:
+                        inference_service.submit_frame(frame, frame_id)
+                        self._last_submitted_frame_id = frame_id
+
+                    # 2. 阻塞等待推理结果（5ms 超时）
+                    #    推理线程完成后设置 _result_event → 主循环立即恢复
+                    result = await loop.run_in_executor(
+                        None, inference_service.wait_for_result, 0.005
+                    )
+
+                    now = time.time()
+
+                    # 3. 再次检查热键（200Hz）
+                    if now - self._last_hotkey_check >= self._hotkey_check_interval:
+                        self._need_prediction = self._check_need_prediction()
+                        self._last_hotkey_check = now
+                    is_inferring = self._need_prediction or self._cached_ai_debug
+
+                    # 4. 处理推理结果
+                    if result and result.detections is not None:
+                        if self._need_prediction:
+                            tracker_service.update(result.detections, result.frame_id)
+
+                        if self._cached_ai_debug:
+                            image_signal.emit_detections(result.detections)
+                            if result.original_frame is not None:
+                                image_signal.emit_video_frame(result.original_frame)
+                else:
+                    # 无需推理，短暂休眠避免 CPU 空转
+                    if self._was_inferring:
+                        image_signal.emit_fps(predict_fps=0)
+                    await asyncio.sleep(0.005)
 
                 self._was_inferring = is_inferring
 
-                # 主循环休眠：100μs ≈ 10kHz 轮询，平衡响应与CPU
-                await asyncio.sleep(0.0001)
+                # 5. 周期性配置检查 (200ms)
+                if now - self._last_config_check >= self._config_check_interval:
+                    self._check_config()
+                    self._last_config_check = now
 
             except Exception as e:
                 logger.error(f"主循环错误: {e}")
-
-    async def _handle_async_inference(self, frame: np.ndarray, frame_id: int, ai_debug: bool, need_prediction: bool):
-        """处理异步推理"""
-        try:
-            # 提交帧进行异步推理
-            inference_service.submit_frame(frame, frame_id)
-
-            # 获取最新推理结果（非阻塞）
-            result = inference_service.get_latest_result()
-
-            if result and result.detections is not None:
-                if ai_debug:
-                    image_signal.emit_detections(result.detections)
-                    image_signal.emit_video_frame(frame)
-
-                if need_prediction:
-                    tracker_service.update(result.detections, result.frame_id)
-            else:
-                # 没有检测到目标，发送空数组清空检测框
-                if ai_debug:
-                    image_signal.emit_detections([])
-                    image_signal.emit_video_frame(frame)
-
-        except Exception as e:
-            logger.error(f"异步推理处理错误: {e}")
 
     def _check_config(self):
         """检查配置变更"""

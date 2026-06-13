@@ -174,8 +174,7 @@ class ScreenCaptureService:
                 self._frame = frame.copy()
                 self._frame_id = fid
 
-            if cfg.get('ai_debug', False):
-                image_signal.emit_video_frame(frame)
+            # ai_debug 视频帧由主循环推理完成后统一发送，避免重复编码
         except Exception as e:
             logger.error(f"处理帧失败: {e}")
 

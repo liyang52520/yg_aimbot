@@ -46,6 +46,7 @@ class AsyncInferenceService:
         # 线程同步
         self._frame_event = threading.Event()
         self._wake_event = threading.Event()
+        self._result_event = threading.Event()
 
         # 推理线程
         self._inference_thread: Optional[threading.Thread] = None
@@ -185,6 +186,13 @@ class AsyncInferenceService:
         """获取最新结果（无锁读取）"""
         return self._latest_result
 
+    def wait_for_result(self, timeout: float = 0.005) -> Optional[InferenceResult]:
+        """等待新推理结果（阻塞调用者线程，建议在 executor 中使用）"""
+        if self._result_event.wait(timeout=timeout):
+            self._result_event.clear()
+            return self._latest_result
+        return None
+
     def add_result_callback(self, callback: Callable):
         """添加结果回调"""
         self._result_callbacks.append(callback)
@@ -221,11 +229,12 @@ class AsyncInferenceService:
                     detections=detections,
                     timestamp=timestamp,
                     processing_time=inference_time,
-                    original_frame=frame if self._result_callbacks else None
+                    original_frame=frame
                 )
 
-                # 更新最新结果（单赋值，线程安全）
+                # 更新最新结果（单赋值，线程安全）并通知消费者
                 self._latest_result = result
+                self._result_event.set()
 
                 # 更新帧率
                 self._prediction_times.append(time.time())

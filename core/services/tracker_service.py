@@ -97,8 +97,10 @@ class TargetTrackerService:
         self._tracked_target: Optional[Target] = None
         self._tracking_confidence = 0.0
 
-        # 动态追踪距离：从配置加载，按目标尺寸缩放
+        # 配置缓存（减少热路径锁竞争）
         self._load_tracking_config()
+        config_service.register_callback(self._on_config_change)
+
         self._switch_cooldown = 0.08  # 略降冷却，切换更灵敏
         self._last_switch_time = 0.0
         self._last_process_time = 0.0
@@ -120,7 +122,20 @@ class TargetTrackerService:
     def _load_tracking_config(self):
         """从配置文件加载追踪参数"""
         aim_cfg = config_service.get_section('aim')
+        self._cache_config(aim_cfg)
+
+    def _on_config_change(self, section: str, updates: dict):
+        """配置变更回调 — 更新缓存"""
+        if section == 'aim':
+            cfg = config_service.get_section('aim')
+            self._cache_config(cfg)
+
+    def _cache_config(self, aim_cfg: dict):
+        """缓存追踪配置值，避免热路径重复读锁"""
         self._max_target_distance = aim_cfg.get('max_target_distance', 160)
+        self._target_cls = aim_cfg.get('target_cls', 1.0)
+        self._max_miss_time = aim_cfg.get('max_miss_time', 0.15)
+        self._max_miss_distance = aim_cfg.get('max_miss_distance', 120)
         self._max_tracking_distance = max(80, self._max_target_distance // 2)
         self._max_tracking_distance_sq = self._max_tracking_distance ** 2
 
@@ -200,9 +215,6 @@ class TargetTrackerService:
         if classes is None:
             classes = np.zeros(n, dtype=np.intp)
 
-        aim_cfg = config_service.get_section('aim')
-        target_cls = aim_cfg.get('target_cls', 1.0)
-
         # 如果有跟踪目标且置信度高，优先跟踪（使用尺寸自适应追踪距离）
         if self._tracked_target and self._tracking_confidence > 0.3:
             current_time = time.time()
@@ -233,12 +245,8 @@ class TargetTrackerService:
 
     def _handle_target(self, target: Target, is_predicted: bool = False):
         """处理目标"""
-        aim_cfg = config_service.get_section('aim')
-        target_cls = aim_cfg.get('target_cls', 1.0)
-        max_distance = aim_cfg.get('max_target_distance', 160)
-
         # 预测目标不检查类别
-        if not is_predicted and target.cls != target_cls:
+        if not is_predicted and target.cls != self._target_cls:
             self.reset()
             return
 
@@ -246,7 +254,7 @@ class TargetTrackerService:
         dy = target.y - self._center_y
         distance_sq = dx * dx + dy * dy
 
-        if distance_sq <= max_distance * max_distance:
+        if distance_sq <= self._max_target_distance * self._max_target_distance:
             from core.services.aim_service import aim_service
             aim_service.process_target(target.x, target.y, target.w, target.h, is_predicted=is_predicted)
 
@@ -266,16 +274,12 @@ class TargetTrackerService:
 
     def _handle_no_detection(self):
         """无检测时用预测器保持跟踪"""
-        aim_cfg = config_service.get_section('aim')
-        max_miss_time = aim_cfg.get('max_miss_time', 0.15)
-        max_miss_distance = aim_cfg.get('max_miss_distance', 120)
-
         if not self._predictor.has_history:
             self.reset()
             return
 
         now = time.time()
-        if now - self._predictor.last_update_time > max_miss_time:
+        if now - self._predictor.last_update_time > self._max_miss_time:
             self.reset()
             return
 
@@ -286,7 +290,7 @@ class TargetTrackerService:
 
         dx = predicted_target.x - self._center_x
         dy = predicted_target.y - self._center_y
-        if dx * dx + dy * dy > max_miss_distance * max_miss_distance:
+        if dx * dx + dy * dy > self._max_miss_distance * self._max_miss_distance:
             self.reset()
             return
 
