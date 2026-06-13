@@ -158,10 +158,11 @@ class Aimbot:
                                 image_signal.emit_video_frame(result.original_frame)
                 else:
                     # 无需推理，短暂休眠避免 CPU 空转
-                    if self._was_inferring:
-                        image_signal.emit_fps(predict_fps=0)
                     await asyncio.sleep(0.005)
 
+                # 检测状态转换：上一轮在推理 → 本轮已停止 → 通知前端
+                if self._was_inferring and not is_inferring:
+                    image_signal.emit_fps(predict_fps=0)
                 self._was_inferring = is_inferring
 
                 # 5. 周期性配置检查 (200ms)
