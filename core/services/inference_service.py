@@ -74,7 +74,7 @@ class AsyncInferenceService:
             model_name = config.get('model_name', 'YOLOv8s_apex_teammate_enemy.engine')
             model_path = f"data/{model_name}"
             device = config.get('device', '0')
-            self._device_str = f"cuda:{device}" if device.isdigit() else device
+            self._device_str = f"cuda:{device}" if str(device).isdigit() else device
             self._conf_threshold = config.get('conf', 0.2)
 
             if model_name.endswith('.onnx'):
@@ -363,6 +363,19 @@ class AsyncInferenceService:
         self._model = None
         self._onnx_session = None
         logger.info("异步推理模型已卸载")
+
+    def reload(self) -> bool:
+        """热重载模型（切换模型时调用）"""
+        logger.info("正在热重载推理模型...")
+        self.stop()
+        self._model = None
+        self._onnx_session = None
+        success = self.load()
+        if success:
+            self.start()
+        else:
+            logger.error("推理模型热重载失败")
+        return success
 
     def get_input_size(self) -> int:
         """获取模型输入大小"""

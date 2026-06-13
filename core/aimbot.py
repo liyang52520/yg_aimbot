@@ -33,6 +33,8 @@ class Aimbot:
         self._last_hotkeys = ''
         self._cache_hotkey_codes()
 
+        self._last_model_name = config_service.get('ai', 'model_name', '')
+
     def _cache_hotkey_codes(self):
         """缓存热键代码"""
         from core.buttons import Buttons
@@ -141,6 +143,7 @@ class Aimbot:
 
     def _check_config(self):
         """检查配置变更"""
+        self._check_model_change()
         capture_service.check_config_change()
         aim_service.update_config()
 
@@ -148,6 +151,15 @@ class Aimbot:
         if hotkeys != self._last_hotkeys:
             self._cache_hotkey_codes()
             self._last_hotkeys = hotkeys
+
+    def _check_model_change(self):
+        """检测模型切换并热重载"""
+        current = config_service.get('ai', 'model_name', '')
+        if current and current != self._last_model_name:
+            self._last_model_name = current
+            logger.info(f"检测到模型切换: {current}")
+            if inference_service.reload():
+                aim_service.set_model_input_size(inference_service.get_input_size())
 
     def _check_need_prediction(self) -> bool:
         """检查是否需要预测"""

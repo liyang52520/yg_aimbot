@@ -80,6 +80,7 @@ new Vue({
         this.ws.onopen = () => {
           this.wsConnected = true;
           this.sendCommand('get-config');
+          this.scanModels();
         };
         
         this.ws.onmessage = (event) => {
