@@ -1,281 +1,196 @@
-# YG Aimbot / YG 辅助瞄准
+# YG Aimbot
 
 <div align="center">
-  <img src="ui/resources/aim.svg" alt="YG Aimbot Logo" width="85"/>
+  <img src="data/aim.svg" alt="YG Aimbot Logo" width="100"/>
 
-  <p>A high-performance, AI-powered aimbot for FPS with advanced features and an intuitive GUI</p>
-  <p>一款高性能、AI驱动的FPS自瞄工具，具有先进功能和直观的GUI界面</p>
+  <p><b>AI-powered aim assistant for FPS games</b><br/>
+  <i>实时推理 · 精准瞄准 · 可视化配置</i></p>
 
-  <div>
-    <img src="https://img.shields.io/badge/Python-3.10-blue.svg" alt="Python 3.10"/>
-    <img src="https://img.shields.io/badge/CUDA-12.8-green.svg" alt="CUDA 12.8"/>
-    <img src="https://img.shields.io/badge/TensorRT-10.9-orange.svg" alt="TensorRT 10.9"/>
-    <img src="https://img.shields.io/badge/Ultralytics-darkblue.svg" alt="Ultralytics"/>
-  </div>
+  <p>
+    <img src="https://img.shields.io/badge/Python-3.10-3776AB?logo=python&logoColor=white" alt="Python 3.10"/>
+    <img src="https://img.shields.io/badge/CUDA-12.8-76B900?logo=nvidia&logoColor=white" alt="CUDA 12.8"/>
+    <img src="https://img.shields.io/badge/TensorRT-10.9-FF6F00?logo=nvidia&logoColor=white" alt="TensorRT 10.9"/>
+    <img src="https://img.shields.io/badge/ONNX-1.23-005CED?logo=onnx&logoColor=white" alt="ONNX 1.23"/>
+    <img src="https://img.shields.io/badge/Electron-47848F?logo=electron&logoColor=white" alt="Electron"/>
+  </p>
 </div>
 
-## 📋 Table of Contents / 目录
+---
 
-- [Features](#features) / [功能](#features)
-- [Requirements](#requirements) / [要求](#requirements)
-- [Installation](#installation) / [安装](#installation)
-- [Quick Start](#quick-start) / [快速开始](#quick-start)
-- [Configuration](#configuration) / [配置](#configuration)
-- [Usage](#usage) / [使用](#usage)
-- [Technical Architecture](#technical-architecture) / [技术架构](#technical-architecture)
-- [Performance](#performance) / [性能](#performance)
-- [FAQ](#faq) / [常见问题](#faq)
-- [Disclaimer](#disclaimer) / [免责声明](#disclaimer)
+## Architecture
 
-## ✨ Features / 功能
+Five threads coordinate the capture → inference → track → aim pipeline:
 
-- **Advanced AI Detection**: Uses YOLOv8s model optimized for Apex Legends to detect enemies with high accuracy
-  **先进的AI检测**：使用针对Apex Legends优化的YOLOv8s模型，高精度检测敌人
-- **Asynchronous Inference**: Double-buffered design for smooth performance
-  **异步推理**：双缓冲设计，实现流畅性能
-- **Precise Aiming**: Customizable smoothness, prediction, and tremor effects
-  **精确瞄准**：可自定义平滑度、预测和抖动效果
-- **Intuitive GUI**: Easy-to-use interface for configuration
-  **直观的GUI**：易于使用的配置界面
-- **Hotkey Support**: Configurable hotkeys with both hold and toggle modes
-  **热键支持**：可配置热键，支持按住和切换模式
-- **Real-time Visualization**: Live detection feedback
-  **实时可视化**：实时检测反馈
+```
+                        Main Loop (200Hz)
 
-## 🛠️ Requirements / 要求
-
-| Component   | Version | 组件          | 版本   |
-|-------------|---------|-------------|------|
-| Python      | 3.10    | Python      | 3.10 |
-| CUDA        | 12.8    | CUDA        | 12.8 |
-| TensorRT    | 10.9    | TensorRT    | 10.9 |
-| Electron    | Latest  | Electron    | 最新版  |
-| Ultralytics | Latest  | Ultralytics | 最新版  |
-| mss         | Latest  | mss         | 最新版  |
-| makcu       | Latest  | makcu       | 最新版  |
-
-## 📦 Installation / 安装
-
-### Step 1: Clone the repository / 步骤1：克隆仓库
-
-```bash
-git clone https://github.com/yourusername/yg-aimbot.git
-cd yg-aimbot
+    Capture ──▶ Inference ──▶ Tracker ──▶ Aim ────▶ Mouse
+    
+                                              │
+                                         UIBridge
+                                              │
+                                         WebSocket :8765
+                                              │
+                                         Electron GUI
 ```
 
-### Step 2: Install dependencies / 步骤2：安装依赖
+| Thread | Role |
+|--------|------|
+| **Main loop** | Coordinates pipeline at 200Hz hotkey check rate |
+| **Capture** | Screen capture via `mss` |
+| **Inference** | Single worker — YOLO (TensorRT) or ONNX Runtime |
+| **Mouse move** | Adaptive-fraction movement at ~2000Hz |
+| **WebSocket** | Event loop for UI communication |
+
+Inference supports two backends: `.pt`/`.engine` via `ultralytics.YOLO` with TensorRT optimisation, and `.onnx` via ONNX Runtime with custom pre/post-processing. The tracker selects the nearest valid target using vectorised numpy, and extrapolates through detection gaps (up to 150ms) with a velocity-weighted linear predictor. Mouse deltas go through body offset → smoothing → tremor → DPI mapping before being applied by a dedicated worker thread.
+
+Three hotkey modes: **hold** (while pressed), **toggle** (press on/off), **auto** (always on). Model hot-reload resizes the capture window automatically.
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+| | |
+|----------|---------|
+| **Python** | 3.10 |
+| **CUDA**  | 12.8 |
+| **TensorRT** | 10.9 |
+| **Node.js** | 18+ |
+
+### Install
 
 ```bash
+# Python environment
+conda create -n yg_aimbot python=3.10
+conda activate yg_aimbot
 pip install --force-reinstall -r requirements.txt
-pip install --force-reinstall torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128
-```
-
-### Step 3: Install TensorRT / 步骤3：安装TensorRT
-
-```bash
+pip install torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128
 pip install ./tensorrt-10.9.0.34-cp310-none-win_amd64.whl
+pip install numpy==1.26.4
+
+# Electron UI
+cd electron_ui && npm install && cd ..
 ```
 
-### Step 4: Install additional dependencies / 步骤4：安装额外依赖
-
-```bash
-pip install --force-reinstall numpy==1.26.4
-```
-
-### Step 5: Install Electron UI / 步骤5：安装 Electron UI
-
-```bash
-cd electron_ui
-npm install
-cd ..
-```
-
-## 🚀 Quick Start / 快速开始
-
-1. **Start the application**: / **启动应用**：
+### Run
 
 ```bash
 python run.py
 ```
 
-2. **Configure settings** in the GUI: / **在GUI中配置设置**：
-    - Adjust capture settings (resolution, FPS) / 调整捕获设置（分辨率、FPS）
-    - Set AI parameters (confidence threshold) / 设置AI参数（置信度阈值）
-    - Configure aim settings (smoothness, prediction) / 配置瞄准设置（平滑度、预测）
-    - Set hotkeys for activation / 设置激活热键
+### First-Time Setup
 
-3. **Launch Apex Legends** and start playing with your configured settings! / **启动Apex Legends**并使用配置的设置开始游戏！
-
-## ⚙️ Configuration / 配置
-
-The application uses a config.ini file for persistent settings. You can also configure everything through the GUI.
-应用使用config.ini文件存储持久设置。您也可以通过GUI配置所有内容。
-
-### Key Configuration Sections / 关键配置部分
-
-- **[capture]**: Screen capture settings (resolution, FPS, circle mask) / **[capture]**：屏幕捕获设置（分辨率、FPS、圆形掩码）
-- **[ai]**: AI detection settings (model, confidence threshold, device) / **[ai]**：AI检测设置（模型、置信度阈值、设备）
-- **[aim]**: Aiming settings (hotkeys, mode, smoothness, prediction) / **[aim]**：瞄准设置（热键、模式、平滑度、预测）
-- **[mouse]**: Mouse settings (DPI, sensitivity, FOV) / **[mouse]**：鼠标设置（DPI、灵敏度、FOV）
-
-### Example Configuration / 配置示例
-
-```ini
-[AI]
-model_name = YOLOv8s_apex_teammate_enemy.engine
-conf = 0.2
-device = 0
-
-[Capture]
-window_width = 320
-window_height = 320
-fps = 240
-circle = False
-ai_debug = True
-
-[Aim]
-auto = False
-mode = hold
-target_cls = 0.0
-body_x_offset = -0.01
-body_y_offset = -0.42
-hotkeys = X1MouseButton,X2MouseButton,RightMouseButton
-max_target_distance = 90
-
-[Mouse]
-move = makcu
-dpi = 1000
-sensitivity = 5.0
-fov_width = 40
-fov_height = 40
-```
-
-## 🎮 Usage / 使用
-
-### Hotkey Modes / 热键模式
-
-- **Hold Mode**: Press and hold the hotkey to activate aimbot / **按住模式**：按住热键激活自瞄
-- **Toggle Mode**: Press the hotkey once to enable, press again to disable / **切换模式**：按一次热键启用，再按一次禁用
-- **Auto Mode**: Aimbot is always active / **自动模式**：自瞄始终处于活动状态
-
-### GUI Controls / GUI控件
-
-- **AI Config Tab**: Adjust model settings and view detection results / **AI配置选项卡**：调整模型设置并查看检测结果
-- **Aim Config Tab**: Configure aiming behavior and hotkeys / **瞄准配置选项卡**：配置瞄准行为和热键
-- **Log Window**: View real-time application logs / **日志窗口**：查看实时应用日志
-- **Performance Metrics**: Monitor FPS and inference times / **性能指标**：监控FPS和推理时间
-
-## 🏗️ Technical Architecture / 技术架构
-
-### Core Services / 核心服务
-
-1. **Config Service**:
-    - Manages application settings
-    - Provides real-time configuration updates
-      **配置服务**：
-    - 管理应用设置
-    - 提供实时配置更新
-2. **Capture Service**:
-    - Uses mss for high-performance screen capture
-    - Supports configurable capture area
-    - Implements circular mask option
-      **捕获服务**：
-    - 使用mss进行高性能屏幕捕获
-    - 支持可配置的捕获区域
-    - 实现圆形掩码选项
-3. **Inference Service**:
-    - Asynchronous double-buffered design
-    - YOLOv8 model with TensorRT optimization
-    - Adaptive FPS for optimal performance
-      **推理服务**：
-    - 异步双缓冲设计
-    - 带有TensorRT优化的YOLOv8模型
-    - 自适应FPS以获得最佳性能
-
-4. **Tracker Service**:
-    - Tracks detected targets
-    - Improves target selection accuracy
-      **跟踪服务**：
-    - 跟踪检测到的目标
-    - 提高目标选择准确性
-5. **Aim Service**:
-    - Precise mouse control using makcu
-    - Smooth aiming with customizable parameters
-    - Target prediction and tremor effects
-      **瞄准服务**：
-    - 使用makcu进行精确鼠标控制
-    - 可自定义参数的平滑瞄准
-    - 目标预测和抖动效果
-
-### Flow Diagram / 流程图
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│ Capture Service │ ──> │ Inference Service │ ──> │  Tracker Service │ ──> │  Aim Service   │ ──> │ Mouse Control   │
-└─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘
-```
-
-## ❓ FAQ / 常见问题
-
-### Q: Is this detectable by anti-cheat systems?
-
-A: While we've implemented various techniques to minimize detection risk, using any third-party software in online games
-carries inherent risks. Use at your own discretion.
-
-### Q：这会被反作弊系统检测到吗？
-
-A：虽然我们已经实施了各种技术来最小化检测风险，但在在线游戏中使用任何第三方软件都存在固有风险。请自行决定是否使用。
-
-### Q: Can I use this with other games?
-
-A: The current model is optimized for Apex Legends. You would need to train a custom model for other games.
-
-### Q：我可以在其他游戏中使用吗？
-
-A：当前模型针对Apex Legends进行了优化。您需要为其他游戏训练自定义模型。
-
-### Q: How do I improve accuracy?
-
-A: Adjust the confidence threshold in the AI settings and fine-tune the aim parameters for your playstyle.
-
-### Q：如何提高准确性？
-
-A：调整AI设置中的置信度阈值，并根据您的游戏风格微调瞄准参数。
-
-### Q: What if I get a "model not found" error?
-
-A: Ensure the model file is present in the `data/` directory and that the model name in config matches the actual
-filename.
-
-### Q：如果出现"model not found"错误怎么办？
-
-A：确保模型文件存在于`data/`目录中，并且配置中的模型名称与实际文件名匹配。
-
-## 📝 Disclaimer / 免责声明
-
-This software is provided for educational purposes only. The developers are not responsible for any consequences
-resulting from the use of this software. Using third-party software to gain an advantage in online games may violate the
-game's terms of service and result in account bans. Use at your own risk.
-本软件仅用于教育目的。开发者对使用本软件产生的任何后果不承担责任。使用第三方软件在在线游戏中获得优势可能违反游戏的服务条款，并导致账号被封禁。请自行承担风险。
-
-## 🤝 Contributing / 贡献
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-欢迎贡献！请随时提交Pull Request。
-
-## 📄 License / 许可证
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-本项目采用MIT许可证 - 详见[LICENSE](LICENSE)文件。
-
-## 👥 Authors / 作者
-
-- Written by Kimi GLM, DouBao Seed GLM, MiniMax GLM and YG team
-- 由Kimi GLM、DouBao Seed GLM、MiniMax GLM和YG团队编写
+1. Place model files (`.pt` / `.engine` / `.onnx`) in `data/`
+2. Launch → select model in **AI Config** → configure hotkeys in **Aim Config**
+3. Adjust `body_x_offset` / `body_y_offset` using the drag canvas
+4. Launch your game and test
 
 ---
 
-<div align="center">
-  <p>Made with ❤️ for the gaming community</p>
-  <p>为游戏社区精心打造 ❤️</p>
-</div>
+## Configuration
+
+Configuration lives in `config.ini`. All settings are editable through the GUI, and most take effect immediately — no restart needed.
+
+### `[AI]` — Model & Detection
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `model_name` | `YOLOv5s_apex_320.onnx` | Model file in `data/` |
+| `conf` | `0.2` | Confidence threshold |
+| `device` | `0` | CUDA device ID |
+
+### `[Capture]` — Screen Capture
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `window_width` | `320` | Capture width (auto-set to model input) |
+| `window_height` | `320` | Capture height |
+| `fps` | `240` | Capture frame rate limit |
+| `circle` | `False` | Circular mask on capture region |
+| `ai_debug` | `False` | Detection overlay + video stream in UI |
+
+### `[Aim]` — Aim Behaviour
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `auto` | `False` | Always-on mode |
+| `mode` | `hold` | `hold` / `toggle` |
+| `target_cls` | `0` | Class to target (0 = enemy, 1 = teammate) |
+| `body_x_offset` | `-0.03` | Horizontal aim offset (fraction of width) |
+| `body_y_offset` | `-0.41` | Vertical aim offset (fraction of height) |
+| `hotkeys` | `X1MouseButton,...` | Comma-separated hotkey names |
+| `max_target_distance` | `100` | Max engagement distance (px) |
+| `max_miss_time` | `0.15` | Max blind prediction time (s) |
+| `max_miss_distance` | `120` | Max blind prediction distance (px) |
+
+### `[Mouse]` — Mouse Output
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `dpi` | `2400` | Mouse DPI |
+| `sensitivity` | `5` | In-game sensitivity |
+| `fov_width` | `40` | Horizontal FOV (degrees) |
+| `fov_height` | `40` | Vertical FOV (degrees) |
+
+---
+
+## Project Structure
+
+```
+yg_aimbot/
+├── run.py                          # Entry point
+├── config.ini                      # Persistent config
+├── data/                           # Model files (.pt / .engine / .onnx)
+│
+├── core/
+│   ├── aimbot.py                   # Main loop, hotkey state machine
+│   ├── buttons.py                  # Win32 virtual key codes
+│   ├── logger.py                   # Coloured logging + WebSocket handler
+│   ├── ui_bridge.py                # UI event dispatch
+│   ├── websocket_server.py         # WebSocket server (port 8765)
+│   │
+│   └── services/
+│       ├── config_service.py       # INI config with callback registry
+│       ├── capture_service.py      # Screen capture (mss)
+│       ├── inference_service.py    # Async YOLO / ONNX inference
+│       ├── tracker_service.py      # Target selection + velocity prediction
+│       └── aim_service.py          # Mouse delta + adaptive movement
+│
+└── electron_ui/
+    ├── main.js                     # Electron window setup
+    ├── index.html                  # Vue 2 + Element UI SPA
+    ├── app.js                      # WebSocket client + config forms
+    └── package.json                # Electron packaging
+```
+
+---
+
+## FAQ
+
+<details>
+<summary><b>Is this detectable by anti-cheat systems?</b></summary>
+We can't make guarantees. Mouse movement uses a hardware-level driver (<code>makcu</code>), but no technique is undetectable. Use at your own risk.
+</details>
+
+<details>
+<summary><b>Can I use this with other games?</b></summary>
+The included models are trained for Apex Legends. You'd need a custom YOLO model for other games.
+</details>
+
+<details>
+<summary><b>How do I improve accuracy?</b></summary>
+Start with <code>body_x_offset</code> / <code>body_y_offset</code> using the drag canvas, then tune smoothing and prediction to match target movement.
+</details>
+
+<details>
+<summary><b>What's the difference between model formats?</b></summary>
+<code>.pt</code> = raw PyTorch (slowest). <code>.engine</code> = TensorRT-optimised (fastest). <code>.onnx</code> = ONNX Runtime. Format is auto-detected from the file extension.
+</details>
+
+---
+
+## Disclaimer
+
+This software is provided for **educational and research purposes only**. Using aim-assistance in online multiplayer games may violate the game's Terms of Service and result in account bans. You assume all responsibility.
