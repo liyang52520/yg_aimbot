@@ -1,5 +1,4 @@
 import logging
-import math
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -116,9 +115,6 @@ class TargetTrackerService:
         self._predictor = TargetPredictor(history_size=5)
         self._is_predicted = False
 
-        # 预分配工作数组（减少GC）
-        self._idx_buffer = np.arange(128, dtype=np.intp)
-
     def _load_tracking_config(self):
         """从配置文件加载追踪参数"""
         aim_cfg = config_service.get_section('aim')
@@ -137,7 +133,6 @@ class TargetTrackerService:
         self._max_miss_time = aim_cfg.get('max_miss_time', 0.15)
         self._max_miss_distance = aim_cfg.get('max_miss_distance', 120)
         self._max_tracking_distance = max(80, self._max_target_distance // 2)
-        self._max_tracking_distance_sq = self._max_tracking_distance ** 2
 
     def _update_center(self):
         """更新中心点坐标"""
@@ -160,8 +155,6 @@ class TargetTrackerService:
         try:
             if isinstance(detections, sv.Detections):
                 self._process_detections(detections)
-            elif hasattr(detections, 'boxes'):
-                self._process_yolo_results(detections)
         except Exception as e:
             logger.error(f"更新检测结果失败: {e}")
 
@@ -176,19 +169,6 @@ class TargetTrackerService:
             self._handle_target(target, is_predicted=False)
         else:
             self._handle_no_detection()
-
-    def _process_yolo_results(self, results):
-        """处理YOLO结果（兼容旧格式）"""
-        for result in results:
-            if not result.boxes:
-                self._handle_no_detection()
-                return
-            detections = sv.Detections.from_ultralytics(result)
-            target = self._select_best_target_numpy(detections)
-            if target:
-                self._handle_target(target, is_predicted=False)
-            else:
-                self._handle_no_detection()
 
     def _select_best_target_numpy(self, detections: sv.Detections) -> Optional[Target]:
         """纯 numpy 选择最佳目标 — 零 torch 开销"""
@@ -268,9 +248,6 @@ class TargetTrackerService:
                 self._predictor.update(target)
         else:
             self.reset()
-
-    def get_best_target(self) -> Optional[Target]:
-        return self._tracked_target
 
     def _handle_no_detection(self):
         """无检测时用预测器保持跟踪"""

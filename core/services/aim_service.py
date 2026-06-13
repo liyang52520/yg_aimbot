@@ -302,6 +302,9 @@ class AimService:
                 with self._move_lock:
                     rx = self._target_remain_x
                     ry = self._target_remain_y
+                    # 在锁内读取帧累计值，避免与 process_target 的 reset 竞争
+                    frame_move_x = abs(self._frame_move_x)
+                    frame_move_y = abs(self._frame_move_y)
 
                 # 空闲检测
                 idle = abs(rx) < self._config.min_move and abs(ry) < self._config.min_move
@@ -322,14 +325,12 @@ class AimService:
                 step_y = self._clamp(step_y)
 
                 # 每帧运动总量限制（防瞬移）
-                remaining_x = self._config.max_frame_move - abs(self._frame_move_x)
-                remaining_y = self._config.max_frame_move - abs(self._frame_move_y)
+                remaining_x = self._config.max_frame_move - frame_move_x
+                remaining_y = self._config.max_frame_move - frame_move_y
                 if abs(step_x) > remaining_x:
                     step_x = math.copysign(max(0.0, remaining_x), step_x)
                 if abs(step_y) > remaining_y:
                     step_y = math.copysign(max(0.0, remaining_y), step_y)
-                self._frame_move_x += abs(step_x)
-                self._frame_move_y += abs(step_y)
 
                 # 亚像素累积：避免 int() 截断丢失精度
                 self._frac_x += step_x
@@ -346,6 +347,9 @@ class AimService:
                 with self._move_lock:
                     self._target_remain_x -= step_x
                     self._target_remain_y -= step_y
+                    # 在锁内更新帧累计值，与 process_target 的 reset 同步
+                    self._frame_move_x += abs(step_x)
+                    self._frame_move_y += abs(step_y)
                     # 防过冲
                     if self._target_remain_x * rx < 0:
                         self._target_remain_x = 0.0
