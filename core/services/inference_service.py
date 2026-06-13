@@ -78,6 +78,9 @@ class AsyncInferenceService:
             self._device_str = f"cuda:{device}" if str(device).isdigit() else device
             self._conf_threshold = config.get('conf', 0.2)
 
+            # 注册配置回调，保持 _conf_threshold 实时更新
+            config_service.register_callback(self._on_config_changed)
+
             if model_name.endswith('.onnx'):
                 self._is_onnx = True
                 return self._load_onnx(model_path)
@@ -88,6 +91,11 @@ class AsyncInferenceService:
         except Exception as e:
             logger.error(f"异步推理模型加载失败: {e}")
             return False
+
+    def _on_config_changed(self, section: str, updates: dict):
+        """配置变更回调 — 更新实时生效的参数"""
+        if section == 'ai' and 'conf' in updates:
+            self._conf_threshold = updates['conf']
 
     def _load_ultralytics(self, model_path: str) -> bool:
         """加载 ultralytics 模型"""
@@ -200,7 +208,6 @@ class AsyncInferenceService:
     def _inference_worker(self):
         """推理工作线程 — 单线程处理帧 + 回调"""
         logger.info("推理工作线程已启动")
-        conf = self._conf_threshold
         device = self._device_str
 
         while self._running:
@@ -220,7 +227,7 @@ class AsyncInferenceService:
 
                 # 执行推理
                 start_time = time.time()
-                detections = self._run_inference(frame, conf, device)
+                detections = self._run_inference(frame, self._conf_threshold, device)
                 inference_time = time.time() - start_time
 
                 # 创建结果
