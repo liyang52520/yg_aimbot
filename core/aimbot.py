@@ -37,6 +37,7 @@ class Aimbot:
 
         self._was_inferring = False
         self._need_prediction = False
+        self._last_fps_zero_emit = 0.0
 
         # 缓存热路径配置值，避免 200Hz 路径重复读锁
         self._cached_ai_debug = config_service.get('capture', 'ai_debug', False)
@@ -136,15 +137,20 @@ class Aimbot:
                 if is_inferring:
                     # 1. 提交最新帧到推理（非阻塞）
                     frame, frame_id = capture_service.get_frame()
+                    need_wait = False
                     if frame is not None and frame_id != self._last_submitted_frame_id:
                         inference_service.submit_frame(frame, frame_id)
                         self._last_submitted_frame_id = frame_id
+                        need_wait = True
 
-                    # 2. 阻塞等待推理结果（5ms 超时）
-                    #    推理线程完成后设置 _result_event → 主循环立即恢复
-                    result = await loop.run_in_executor(
-                        None, inference_service.wait_for_result, 0.005
-                    )
+                    # 2. 等待推理结果 — 仅在有新帧提交时才阻塞
+                    if need_wait:
+                        result = await loop.run_in_executor(
+                            None, inference_service.wait_for_result, 0.005
+                        )
+                    else:
+                        # 无新帧 → 直接取最新结果，避免 5ms 空等
+                        result = inference_service.get_latest_result()
 
                     now = time.time()
 
@@ -167,6 +173,13 @@ class Aimbot:
                 else:
                     # 无需推理，短暂休眠避免 CPU 空转
                     await asyncio.sleep(0.005)
+                    # 竞态修复：推理线程可能仍在处理已提交的最后一帧，
+                    # 完成后 _update_prediction_fps 会发射非零值覆盖归零结果。
+                    # 这里定时重新归零，确保前端显示正确。
+                    now = time.time()
+                    if now - self._last_fps_zero_emit >= 0.2:  # 5Hz节流
+                        image_signal.emit_fps(predict_fps=0)
+                        self._last_fps_zero_emit = now
 
                 # 检测状态转换：上一轮在推理 → 本轮已停止 → 通知前端
                 if self._was_inferring and not is_inferring:

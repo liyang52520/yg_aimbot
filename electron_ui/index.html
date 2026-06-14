@@ -128,10 +128,18 @@
                         模型设置
                       </h4>
                       <div class="form-group">
+                        <label class="form-label">推理后端</label>
+                        <el-radio-group v-model="config.ai.model_type" @change="onModelTypeChanged" size="small">
+                          <el-radio-button v-for="opt in modelTypeOptions" :key="opt.value" :label="opt.value">
+                            {{ opt.label }}
+                          </el-radio-button>
+                        </el-radio-group>
+                      </div>
+                      <div class="form-group">
                         <label class="form-label">AI 模型</label>
                         <div class="form-control with-action">
                           <el-select v-model="config.ai.model_name" size="small" @change="autoApply" style="flex: 1;">
-                            <el-option v-for="model in modelList" :key="model" :label="model" :value="model"></el-option>
+                            <el-option v-for="model in currentModels" :key="model" :label="model" :value="model"></el-option>
                           </el-select>
                           <el-button icon="el-icon-refresh" circle size="small" @click="scanModels"></el-button>
                         </div>

@@ -28,15 +28,41 @@ class InferenceResult:
 
 
 class AsyncInferenceService:
-    """异步推理服务 — 单工作线程 + 原地回调"""
+    """异步推理服务 — 单工作线程 + 原地回调
+
+    推理后端由 data/ 下的子目录名决定:
+      data/onnx/       → ONNX Runtime (GPU)
+      data/tensorrt/   → TensorRT（自定义加载，性能最优）
+      data/ultralytics/ → Ultralytics YOLO
+
+    用户只需将模型文件放入对应目录，配置 model_name 时包含目录前缀即可。
+    例如: model_name = tensorrt/YOLOv5s_apex_320_fp16.engine
+    """
+
+    # 推理后端类型常量
+    MODEL_TYPE_ULTRALYTICS = "ultralytics"
+    MODEL_TYPE_ONNX = "onnx"
+    MODEL_TYPE_TENSORRT = "tensorrt"
+
+    _MODEL_TYPE_LABELS = {
+        MODEL_TYPE_ULTRALYTICS: "Ultralytics YOLO",
+        MODEL_TYPE_ONNX: "ONNX Runtime",
+        MODEL_TYPE_TENSORRT: "TensorRT",
+    }
 
     def __init__(self):
-        self._model = None
-        self._onnx_session = None
+        self._model = None          # ultralytics.YOLO instance
+        self._onnx_session = None   # ort.InferenceSession
         self._input_size = 640
         self._device_str = None
-        self._is_onnx = False
+        self._model_type = None     # MODEL_TYPE_* or None
         self._running = False
+
+        # TensorRT 引擎资源（GPU 内存由 torch 管理，避免 pycuda 上下文问题）
+        self._trt_engine = None
+        self._trt_context = None
+        self._trt_input_tensor = None
+        self._trt_output_tensor = None
 
         # 最新帧存储（无锁 — 单一生产者/消费者模式）
         self._latest_frame = None
@@ -69,11 +95,27 @@ class AsyncInferenceService:
         self._conf_threshold = 0.2
 
     def load(self) -> bool:
-        """加载模型 — 支持 .pt/.engine (ultralytics) 和 .onnx (ONNX Runtime)"""
+        """加载模型 — 通过 model_type 选择推理后端，从对应子目录加载
+
+        配置示例:
+          model_type = tensorrt      # onnx / tensorrt / ultralytics
+          model_name = YOLOv5s_apex_320_fp16.engine
+
+        实际路径: data/{model_type}/{model_name}
+        """
         try:
             config = config_service.get_section('ai')
-            model_name = config.get('model_name', 'YOLOv8s_apex_teammate_enemy.engine')
-            model_path = f"data/{model_name}"
+            model_type = config.get('model_type', '').strip().lower()
+            model_name = config.get('model_name', '').strip()
+
+            if not model_type or model_type not in self._MODEL_TYPE_LABELS:
+                logger.error(f"model_type 无效或未配置: '{model_type}'，须为 onnx / tensorrt / ultralytics")
+                return False
+            if not model_name:
+                logger.error("model_name 未配置")
+                return False
+
+            model_path = f"data/{model_type}/{model_name}"
             device = config.get('device', '0')
             self._device_str = f"cuda:{device}" if str(device).isdigit() else device
             self._conf_threshold = config.get('conf', 0.2)
@@ -81,21 +123,37 @@ class AsyncInferenceService:
             # 注册配置回调，保持 _conf_threshold 实时更新
             config_service.register_callback(self._on_config_changed)
 
-            if model_name.endswith('.onnx'):
-                self._is_onnx = True
-                return self._load_onnx(model_path)
+            # 按 model_type 选择推理后端
+            self._model_type = model_type
+            loaders = {
+                self.MODEL_TYPE_ONNX: self._load_onnx,
+                self.MODEL_TYPE_TENSORRT: self._load_trt_engine,
+                self.MODEL_TYPE_ULTRALYTICS: self._load_ultralytics,
+            }
+            ok = loaders[model_type](model_path)
+
+            if ok:
+                logger.info(f"模型加载成功 [{self.model_type}]: {model_name}, "
+                            f"输入: {self._input_size}x{self._input_size}")
             else:
-                self._is_onnx = False
-                return self._load_ultralytics(model_path)
+                logger.error(f"模型加载失败: {model_name}")
+                self._model_type = None
+            return ok
 
         except Exception as e:
-            logger.error(f"异步推理模型加载失败: {e}")
+            logger.error(f"模型加载失败: {e}")
+            self._model_type = None
             return False
 
     def _on_config_changed(self, section: str, updates: dict):
         """配置变更回调 — 更新实时生效的参数"""
         if section == 'ai' and 'conf' in updates:
             self._conf_threshold = updates['conf']
+
+    @property
+    def model_type(self) -> str:
+        """当前推理后端的人类可读名称，如 'TensorRT' / 'ONNX Runtime' / 'Ultralytics YOLO'"""
+        return self._MODEL_TYPE_LABELS.get(self._model_type, "未加载")
 
     def _load_ultralytics(self, model_path: str) -> bool:
         """加载 ultralytics 模型"""
@@ -107,6 +165,7 @@ class AsyncInferenceService:
             return True
         except Exception as e:
             logger.error(f"Ultralytics 模型加载失败: {e}")
+            self._model = None
             return False
 
     def _load_onnx(self, model_path: str) -> bool:
@@ -136,12 +195,9 @@ class AsyncInferenceService:
 
     def _warmup(self):
         """预热 ultralytics 模型"""
-        try:
-            dummy = np.zeros((self._input_size, self._input_size, 3), dtype=np.uint8)
-            self._model(dummy, conf=self._conf_threshold, device=self._device_str)
-            logger.info("异步推理模型预热完成")
-        except Exception as e:
-            logger.warning(f"异步推理模型预热失败: {e}")
+        dummy = np.zeros((self._input_size, self._input_size, 3), dtype=np.uint8)
+        self._model(dummy, conf=self._conf_threshold, device=self._device_str)
+        logger.info("异步推理模型预热完成")
 
     def _warmup_onnx(self):
         """预热 ONNX 模型"""
@@ -160,6 +216,111 @@ class AsyncInferenceService:
         except Exception:
             pass
         return 640
+
+    def _load_trt_engine(self, model_path: str) -> bool:
+        """加载 TensorRT 引擎（TRT 10.x API，GPU 内存由 torch 管理）"""
+        try:
+            import tensorrt as trt
+
+            trt_logger = trt.Logger(trt.Logger.ERROR)
+            runtime = trt.Runtime(trt_logger)
+
+            with open(model_path, 'rb') as f:
+                engine = runtime.deserialize_cuda_engine(f.read())
+
+            context = engine.create_execution_context()
+
+            input_name = output_name = None
+            for i in range(engine.num_io_tensors):
+                name = engine.get_tensor_name(i)
+                if engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
+                    input_name = name
+                else:
+                    output_name = name
+
+            # 从引擎获取输入 shape (NCHW)
+            input_shape = tuple(context.get_tensor_shape(input_name))
+            if any(d == -1 for d in input_shape):
+                input_shape = (1, 3, 320, 320)  # 默认 fallback
+                context.set_input_shape(input_name, input_shape)
+            self._input_size = input_shape[2]  # H
+
+            output_shape = tuple(context.get_tensor_shape(output_name))
+
+            # 使用 torch 分配 GPU 内存（避免 pycuda 上下文栈问题）
+            import torch
+            self._trt_input_tensor = torch.empty(input_shape, dtype=torch.float32, device='cuda:0')
+            self._trt_output_tensor = torch.empty(output_shape, dtype=torch.float32, device='cuda:0')
+
+            context.set_tensor_address(input_name, self._trt_input_tensor.data_ptr())
+            context.set_tensor_address(output_name, self._trt_output_tensor.data_ptr())
+
+            # 保存资源
+            self._trt_engine = engine
+            self._trt_context = context
+
+            logger.info(f"TensorRT 引擎加载成功: {model_path}, 输入: {self._input_size}x{self._input_size}")
+            return True
+        except Exception as e:
+            logger.error(f"TensorRT 引擎加载失败: {e}")
+            return False
+
+    def _run_trt_inference(self, image: np.ndarray, conf: float):
+        """TensorRT 推理 — 默认 stream"""
+        if self._trt_context is None:
+            return None
+        try:
+            input_tensor = np.ascontiguousarray(
+                self._preprocess_onnx(image, self._input_size))
+
+            import torch
+            self._trt_input_tensor.copy_(torch.from_numpy(input_tensor))
+            self._trt_context.execute_async_v3(0)
+            h_output = self._trt_output_tensor.cpu().numpy()
+
+            return self._postprocess_onnx(h_output, conf, image.shape[1], image.shape[0])
+        except Exception as e:
+            logger.error(f"TensorRT 推理错误: {e}")
+            return None
+
+    def _profile_trt_inference(self, image: np.ndarray, conf: float):
+        """带分阶段计时的 TRT 推理（用于排查性能问题）"""
+        if self._trt_context is None:
+            return None
+        try:
+            t0 = time.perf_counter()
+            input_tensor = np.ascontiguousarray(
+                self._preprocess_onnx(image, self._input_size))
+            t_pre = time.perf_counter()
+
+            import torch
+            self._trt_input_tensor.copy_(torch.from_numpy(input_tensor))
+            t_h2d = time.perf_counter()
+
+            self._trt_context.execute_async_v3(0)
+            t_trt = time.perf_counter()
+
+            h_output = self._trt_output_tensor.cpu().numpy()
+            t_d2h = time.perf_counter()
+
+            result = self._postprocess_onnx(h_output, conf, image.shape[1], image.shape[0])
+            t_post = time.perf_counter()
+
+            logger.info(
+                f"TRT profile: pre={t_pre-t0:.3f}s h2d={t_h2d-t_pre:.3f}s "
+                f"trt={t_trt-t_h2d:.3f}s d2h={t_d2h-t_trt:.3f}s post={t_post-t_d2h:.3f}s"
+            )
+            return result
+        except Exception as e:
+            logger.error(f"TensorRT 推理错误: {e}")
+            return None
+
+    def _unload_trt(self):
+        """清理 TensorRT 资源（GPU 内存由 torch 自动释放）"""
+        self._trt_context = None
+        self._trt_engine = None
+        self._trt_input_tensor = None
+        self._trt_output_tensor = None
 
     def start(self):
         """启动服务"""
@@ -210,6 +371,16 @@ class AsyncInferenceService:
         logger.info("推理工作线程已启动")
         device = self._device_str
 
+        # 预热 CUDA 上下文（确保 worker 线程有正确的 CUDA 上下文）
+        if self._model_type == self.MODEL_TYPE_TENSORRT:
+            try:
+                import torch
+                # 触发 worker 线程的 CUDA 上下文初始化
+                _ = self._trt_input_tensor.device
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+
         while self._running:
             try:
                 # 等待新帧（事件唤醒，无轮询）
@@ -259,8 +430,10 @@ class AsyncInferenceService:
                 time.sleep(0.005)
 
     def _run_inference(self, image: np.ndarray, conf: float, device: str):
-        """运行推理 — 自动选择 ONNX 或 ultralytics 路径"""
-        if self._is_onnx:
+        """运行推理 — 按 _model_type 自动分发到对应后端"""
+        if self._model_type == self.MODEL_TYPE_TENSORRT:
+            return self._run_trt_inference(image, conf)
+        elif self._model_type == self.MODEL_TYPE_ONNX:
             return self._run_onnx_inference(image, conf)
         else:
             return self._run_ultralytics_inference(image, conf, device)
@@ -378,21 +551,22 @@ class AsyncInferenceService:
     def unload(self):
         """卸载模型"""
         self.stop()
+        config_service.unregister_callback(self._on_config_changed)
         self._model = None
         self._onnx_session = None
-        logger.info("异步推理模型已卸载")
+        self._unload_trt()
+        self._model_type = None
+        logger.info("模型已卸载")
 
     def reload(self) -> bool:
         """热重载模型（切换模型时调用）"""
-        logger.info("正在热重载推理模型...")
-        self.stop()
-        self._model = None
-        self._onnx_session = None
+        logger.info("正在热重载模型...")
+        self.unload()
         success = self.load()
         if success:
             self.start()
         else:
-            logger.error("推理模型热重载失败")
+            logger.error("模型热重载失败")
         return success
 
     def get_input_size(self) -> int:

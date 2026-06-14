@@ -247,27 +247,32 @@ class WebSocketServer:
             logger.error(f"应用配置失败: {e}")
             
     async def _handle_scan_models(self, websocket):
-        """处理扫描模型文件"""
+        """扫描 data/ 子目录下的模型文件，按类型分组"""
         import os
-        
-        models_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
-        extensions = ['.pt', '.onnx', '.engine']
-        
-        models = []
+
+        data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+        # 按子目录分组：{type: [filename, ...]}
+        models_by_type = {
+            'onnx': [],
+            'tensorrt': [],
+            'ultralytics': [],
+        }
+        extensions = ('.pt', '.onnx', '.engine')
+
         try:
-            if os.path.exists(models_dir) and os.path.isdir(models_dir):
-                for file in os.listdir(models_dir):
-                    if any(file.endswith(ext) for ext in extensions):
-                        models.append(file)
+            if os.path.exists(data_dir) and os.path.isdir(data_dir):
+                for subdir in models_by_type:
+                    subpath = os.path.join(data_dir, subdir)
+                    if os.path.isdir(subpath):
+                        for file in sorted(os.listdir(subpath)):
+                            if file.lower().endswith(extensions):
+                                models_by_type[subdir].append(file)
         except Exception as e:
             logger.error(f"扫描模型失败: {e}")
-            
-        if not models:
-            models = ['YOLOv8s_apex_teammate_enemy.engine']
-            
+
         await websocket.send(json.dumps({
             'type': 'models',
-            'data': models
+            'data': models_by_type
         }))
         
     def broadcast_sync(self, message: dict):

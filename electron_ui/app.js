@@ -11,7 +11,12 @@ new Vue({
       detectionCount: 0,
       detections: [],
       logs: [],
-      modelList: ['YOLOv8s_apex_teammate_enemy.engine'],
+      modelList: {'onnx': [], 'tensorrt': [], 'ultralytics': []},
+      modelTypeOptions: [
+        {value: 'tensorrt', label: 'TensorRT', icon: 'el-icon-lightning'},
+        {value: 'onnx', label: 'ONNX Runtime', icon: 'el-icon-cpu'},
+        {value: 'ultralytics', label: 'Ultralytics YOLO', icon: 'el-icon-connection'},
+      ],
       selectedHotkeys: [],
       isDragging: false,
       
@@ -21,7 +26,8 @@ new Vue({
       
       config: {
         ai: {
-          model_name: 'YOLOv8s_apex_teammate_enemy.engine',
+          model_type: 'tensorrt',
+          model_name: 'YOLOv5s_apex_320_fp16.engine',
           conf: 0.2,
           device: 0
         },
@@ -50,6 +56,15 @@ new Vue({
         }
       }
     };
+  },
+  computed: {
+    currentModels() {
+      return this.modelList[this.config.ai.model_type] || [];
+    },
+    modelTypeLabel() {
+      const opt = this.modelTypeOptions.find(o => o.value === this.config.ai.model_type);
+      return opt ? opt.label : this.config.ai.model_type;
+    }
   },
   mounted() {
     this.connectWebSocket();
@@ -319,6 +334,16 @@ new Vue({
     
     scanModels() {
       this.sendCommand('scan-models');
+    },
+
+    onModelTypeChanged(value) {
+      this.config.ai.model_type = value;
+      // 切换到新类型后，如果当前模型不在该类型列表中，选第一个
+      const models = this.modelList[value] || [];
+      if (models.length > 0 && !models.includes(this.config.ai.model_name)) {
+        this.config.ai.model_name = models[0];
+      }
+      this.autoApply();
     },
     
     toggleAim() {

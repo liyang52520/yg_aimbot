@@ -29,7 +29,8 @@ class ConfigService:
             'ai_debug': False
         },
         'ai': {
-            'model_name': 'YOLOv8s_apex_teammate_enemy.engine',
+            'model_type': 'tensorrt',
+            'model_name': 'YOLOv5s_apex_320_fp16.engine',
             'conf': 0.2,
             'device': '0'
         },
